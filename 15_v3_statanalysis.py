@@ -573,3 +573,119 @@ plt.tight_layout()
 plt.show()
 
 # %%
+def load_group_data(group_mice, event, path_to_data, PERIEVENT_WINDOW):
+    """Load and pad/interpolate psth and df_trials for a group of mice to a common length."""
+    combined_psth = []
+    combined_trials = []
+    target_rate = 30
+    max_time_length = 0
+
+    for mouse in group_mice:
+        try:
+            psth_path_30 = os.path.join(path_to_data, f'psth_{mouse}_{event}_allsessions_30Hz.npy')
+            psth_path_15 = os.path.join(path_to_data, f'psth_{mouse}_{event}_allsessions_15Hz.npy')
+            df_trials_path_30 = os.path.join(path_to_data, f'df_trials_{mouse}_{event}_allsessions_30Hz.pqt')
+            df_trials_path_15 = os.path.join(path_to_data, f'df_trials_{mouse}_{event}_allsessions_15Hz.pqt')
+            
+            if os.path.exists(psth_path_30):
+                psth = np.load(psth_path_30)
+                df_trials = pd.read_parquet(df_trials_path_30)
+            elif os.path.exists(psth_path_15):
+                psth = np.load(psth_path_15)
+                psth = interpolate_to_common_time(psth, current_rate=15, target_rate=30, PERIEVENT_WINDOW=PERIEVENT_WINDOW)
+                df_trials = pd.read_parquet(df_trials_path_15)
+            else:
+                continue
+
+            # Add the 'subject_2' column to df_trials, mapping it to the current mouse
+            df_trials['subject_2'] = mouse  # Add the mouse as a 'subject_2' column
+
+
+            max_time_length = max(max_time_length, psth.shape[0])
+            combined_psth.append(psth)
+            combined_trials.append(df_trials)
+        
+        except Exception as e:
+            print(f"Error loading data for {mouse} | Event: {event}: {e}")
+    
+    if combined_psth and combined_trials:
+        # Pad all PSTH arrays to match the longest one
+        combined_psth = [pad_to_match_length(psth, max_time_length) for psth in combined_psth]
+        psth_combined = np.concatenate(combined_psth, axis=1)
+        df_trials_combined = pd.concat(combined_trials, ignore_index=True)
+        return psth_combined, df_trials_combined
+    else:
+        return None, None 
+    
+
+
+
+
+# path_to_data = '/mnt/h0/kb/Feb2025/data_behav_psth/Good_sessions/'
+path_to_data = '/home/kceniabougrova/Documents/NM_project_fromIBLserver/Good_sessions'
+EVENTS = ['stimOnTrigger_times']
+
+groups = {
+    "DA": ["ZFM-03447", "ZFM-04026", "ZFM-04022_R", "ZFM-03448", "ZFM-04019", "ZFM-04022_L"]}  
+
+for group_name, group_mice in groups.items():
+    for event in EVENTS:
+        print(f"Processing group {group_name} | Event: {event}")
+        psth_combined, df_trials_combined = load_group_data(group_mice, event, path_to_data, PERIEVENT_WINDOW=[-1, 2])
+if psth_combined.shape[0] == 91:
+    psth_combined = psth_combined.T  # Now shape = (10628, 91)
+
+        
+
+
+# Define the mapping for NM groups
+nm_groups = {
+    "DA": ["ZFM-03447", "ZFM-04026", "ZFM-04022_R", "ZFM-03448", "ZFM-04019", "ZFM-04022_L"],
+}
+
+# Create a function to map the mouse ID to NM label
+def map_nm(mouse):
+    for nm, mice in nm_groups.items():
+        if mouse in mice:
+            return nm
+    return "Unknown"  # In case the mouse is not found in any group
+
+# Add the "NM" column
+df_trials_combined['NM'] = df_trials_combined['mouse'].apply(map_nm)
+
+# Create a function to determine the session type
+def determine_sessiontype(eid, probL_values):
+    # Check if probL contains only 0.5, 0.2, 0.8 and no other values for a particular eid
+    if set(probL_values) == {0.5, 0.2, 0.8}:
+        return "BiasedCW"
+    else:
+        return "TrainingCW"
+
+# Group by "eid" and apply the session type rule
+df_trials_combined['sessiontype'] = df_trials_combined.groupby('eid')['probL'].transform(lambda x: determine_sessiontype(x.name, x))
+
+# Drop the 'mouse' column and reorder the columns
+df_trials_combined = df_trials_combined.drop(columns=['mouse', 'probabilityLeft'])
+
+# Check if the number of rows in both is the same
+if df_trials_combined.shape[0] == psth_combined.shape[0]:
+    # Add psth_combined as a new column 'psth_values' in df_trials_combined
+    df_trials_combined['psth_values'] = [list(psth_combined[i]) for i in range(len(psth_combined))]
+else:
+    print("Error: The number of rows in df_trials_combined and psth_combined do not match.")
+
+# Define the desired column order
+column_order = [
+    'NM', 'subject', 'subject_2', 'region', 'date', 'eid', 'sessiontype', 'trialNumber',
+    'intervals_0', 'stimOnTrigger_times', 'goCueTrigger_times', 'goCue_times', 'stimOn_times',
+    'firstMovement_times', 'response_times', 'feedback_times', 'stimOffTrigger_times', 'stimOff_times',
+    'intervals_1', 'quiescencePeriod', 'contrastLeft', 'contrastRight', 'allContrasts', 'allSContrasts',
+    'choice', 'feedbackType', 'probL', 'biasShift', 'rewardVolume', 'reactionTime', 'responseTime',
+    'trialTime', 'psth_values'
+]
+
+# Reorganize the columns in the specified order
+df_trials_combined = df_trials_combined[column_order]
+
+# df_trials_combined.to_csv('/home/kceniabougrova/Downloads/DA_stimOnAlignedTraces.csv', index=False)
+df_trials_combined.to_parquet('/home/kceniabougrova/Downloads/DA_stimOnAlignedTraces.pqt', index=False)
