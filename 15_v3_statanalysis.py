@@ -688,4 +688,33 @@ column_order = [
 df_trials_combined = df_trials_combined[column_order]
 
 # df_trials_combined.to_csv('/home/kceniabougrova/Downloads/DA_stimOnAlignedTraces.csv', index=False)
-df_trials_combined.to_parquet('/home/kceniabougrova/Downloads/DA_stimOnAlignedTraces.pqt', index=False)
+# df_trials_combined.to_parquet('/home/kceniabougrova/Downloads/DA_stimOnAlignedTraces.pqt', index=False)
+
+
+
+
+#%%
+
+df_trials_combined_2 = df_trials_combined.drop(columns=['NM', 'subject', 'region', 'date', 'eid', 'trialNumber', 'intervals_0', 'stimOnTrigger_times',
+       'goCueTrigger_times', 'goCue_times', 'stimOn_times',
+       'firstMovement_times', 'response_times', 'feedback_times',
+       'stimOffTrigger_times', 'stimOff_times', 'intervals_1',
+       'quiescencePeriod', 'contrastLeft', 'contrastRight', 'allSContrasts', 'choice', 'probL', 'biasShift',
+       'rewardVolume', 'reactionTime', 'responseTime', 'trialTime'])
+
+df_trials_combined_2['psth_values'] = df_trials_combined_2['psth_values'].apply(lambda x: x[31:40])
+
+
+
+
+#%%
+""" alongate the df to include psth values per row """ 
+# Expand the 'psth_values' list column into multiple rows
+df_trials_long = df_trials_combined_2.explode('psth_values').reset_index(drop=True)
+
+# Create a new 'time_point' column representing each of the 91 time points
+df_trials_long['time_point'] = df_trials_long.groupby('subject_2').cumcount()  # This will create a time point index for each trial
+
+# You can now use this reshaped DataFrame for GLMM fitting
+df_trials_long
+# %%
