@@ -1,6 +1,9 @@
 """
 KB - June2025
 edit the fiber regions
+    df = subject	date	region	eid	fiber	added
+    df_probes = subject	probename	fiber_diameter_um	fiber_length_mm	numerical_aperture	targeted_regions	X-ml_um	Y-ap_um	Z-dv_um	depth	theta	phi	roll	expression	surg
+
 """ 
 
 #%%
@@ -14,9 +17,11 @@ df = pd.read_csv(file_path_df)
 df_probes = pd.read_csv(file_path_probes)
 df
 
-# %%
-""" DONE AND SAVED IN df """
-# #===========================================================================
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+""" 
+DONE AND SAVED IN df 
+Get the probe id in the fiber column of df for animals with 1 fiber 
+"""
 # """ edit the "fiber" column from df with the mice with 1 fiber implant """
 # subjects_to_match = [
 #     'ZFM-02128', 'ZFM-03059', 'ZFM-03062', 'ZFM-03065',
@@ -46,13 +51,13 @@ df
 # # df.to_csv(file_path_df, index=False)
 
 
-# %%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 """ count the number of NaNs in df "fiber" column """
 nan_count = df['fiber'].isna().sum()
 print(f'Number of NaN values in the fiber column: {nan_count}')
 
-#%%
-""" Check the """
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+""" Check the area of each region in the mice with 2 fibers - DONE, checked manually! """
 # Load the Excel file into a DataFrame
 df_excel = pd.read_excel('/home/kceniabougrova/Downloads/saved_all_sheet_df_eid (1).xlsx') 
 df_excel["subject"] = df_excel["mouse"]
@@ -63,7 +68,16 @@ df['date'] = df['date'].astype(str)
 df_excel['subject'] = df_excel['subject'].astype(str)
 df_excel['date'] = df_excel['date'].astype(str)
 
-# Merge to find non-overlapping (subject, date) pairs from df_excel not in df
+# Merge to find non-overlapping (subject, date) pairs from df_excel not in df 
+"""
+The indicator=True argument adds a special column called _merge, which tells us:
+
+'both' → row found in both df_excel and df
+
+'left_only' → row only found in df_excel 
+
+'right_only' → only in df (not relevant here)
+"""
 merged_check = pd.merge(
     df_excel,
     df[['subject', 'date']],
@@ -80,8 +94,36 @@ df_new = df_new.reset_index(drop=True)
 
 # Display how many new rows were found
 print(f"{len(df_new)} new (subject, date) pairs found in df_excel but not in df.")
+
+# To save 
+# df_new.to_csv('/home/kceniabougrova/Downloads/df_new.csv', index=False)
+
+
+
 #%%
 
+# STEP 1: Prepare df_probes mapping for fiber
+df_probes['subject'] = df_probes['subject'].astype(str)
+fiber_map = df_probes[['subject', 'probename']].drop_duplicates().rename(columns={'probename': 'fiber'})
+
+# STEP 2: Merge fiber info into df_new using subject
+df_new['subject'] = df_new['subject'].astype(str)
+df_new = pd.merge(df_new, fiber_map, on='subject', how='left')
+
+# STEP 3: Add 'added' column
+df_new['added'] = 'yes'
+
+# STEP 4: Rename EID column to eid
+df_new = df_new.rename(columns={'EID': 'eid'})
+
+# STEP 5: Ensure correct column order
+df_new = df_new[['subject', 'date', 'region', 'eid', 'fiber', 'added']]
+
+# STEP 6: Sort by subject and date
+df_new = df_new.sort_values(by=['subject', 'date']).reset_index(drop=True)
+
+# ✅ Done: Show result
+df_new
 
 
 
@@ -114,10 +156,4 @@ print(f"{len(df_new)} new (subject, date) pairs found in df_excel but not in df.
 
 
 
-
-
-
-
-
-
-
+# %%
