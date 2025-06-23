@@ -16,7 +16,7 @@ import pandas as pd
 base_path = "/media/kceniabougrova/Seagate Basic/IBL_server_PC_20250529/kb/data/one/mainenlab/Subjects"
 
 results = []
-multiple_sessions = []
+multiple_sessions = [] #multiple behavior folders for 1 session day
 
 for subject in os.listdir(base_path):
     subject_path = os.path.join(base_path, subject)
@@ -93,6 +93,19 @@ Note:
     - not all the behavior sessions might be here
         => so lets check what are the photometry sessions that we have 
 """ 
+
+remove = ['ZFM-02369', 'ZFM-05239', 'ZFM-05244', 
+          'ZFM-05247', 'ZFM-08652', 'ZFM-08751', 'ZFM-08757', 
+          'ZFM-08827', 'ZFM-08828', 'ZM_3003']
+
+df_main = df_main[~df_main['subject'].isin(remove)]
+df_main = df_main.reset_index(drop=True)
+
+for col in df_main.columns:
+    print(f"\nValue counts for column: {col}")
+    print(df_main[col].value_counts(dropna=False))
+
+    
 
 import os
 import pandas as pd
