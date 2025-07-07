@@ -376,3 +376,76 @@ def mad_raw_signal(raw_signal, fs):
     signal_lp = low_pass_filter(raw_signal, fs)
     signal_processed = (raw_signal - signal_lp) / signal_lp
     return signal_processed
+
+#%%
+from scipy.signal import butter, filtfilt
+import numpy as np
+import pandas as pd
+
+def preprocess_photometry(
+    df_nph,
+    calcium_col="raw_calcium",
+    isosbestic_col="raw_isosbestic",
+    fs=None,
+    lowpass_hz=2,
+    zscore=True
+):
+    """
+    Preprocess photometry data by:
+    1) Lowpass filtering.
+    2) Regressing out isosbestic (motion/bleaching correction).
+    3) Computing ΔF/F.
+    4) Optionally z-scoring.
+
+    Parameters:
+    - df_nph: DataFrame with columns ['times', raw_calcium, raw_isosbestic].
+    - calcium_col: Name of the calcium channel column.
+    - isosbestic_col: Name of the isosbestic channel column.
+    - fs: Sampling rate (Hz). If None, will estimate from 'times'.
+    - lowpass_hz: Lowpass cutoff frequency (Hz).
+    - zscore: Whether to z-score the ΔF/F signal.
+
+    Returns:
+    - df_out: DataFrame with ['times', 'dff', 'dff_zscore']
+    """
+
+    times = df_nph["times"].values
+    raw_calcium = df_nph[calcium_col].values
+    raw_isosbestic = df_nph[isosbestic_col].values
+
+    # 1) Estimate sampling rate if not given
+    if fs is None:
+        fs = 1.0 / np.median(np.diff(times))
+        print(f"Estimated sampling rate: {fs:.2f} Hz")
+
+    # 2) Lowpass filter both channels
+    b, a = butter(2, lowpass_hz / (fs / 2), btype="low")
+    calcium_filt = filtfilt(b, a, raw_calcium)
+    isosbestic_filt = filtfilt(b, a, raw_isosbestic)
+
+    # 3) Regress isosbestic out of calcium
+    # Fit: calcium_filt = beta * isosbestic_filt + intercept
+    A = np.vstack([isosbestic_filt, np.ones_like(isosbestic_filt)]).T
+    beta, intercept = np.linalg.lstsq(A, calcium_filt, rcond=None)[0]
+    fitted_isosbestic = beta * isosbestic_filt + intercept
+
+    corrected = calcium_filt - fitted_isosbestic
+
+    # 4) Compute ΔF/F
+    baseline = np.median(fitted_isosbestic)
+    dff = corrected / baseline
+
+    # 5) Z-score if requested
+    if zscore:
+        dff_zscore = (dff - np.mean(dff)) / np.std(dff)
+    else:
+        dff_zscore = dff
+
+    # 6) Prepare output DataFrame
+    df_out = pd.DataFrame({
+        "times": times,
+        "dff": dff,
+        "dff_zscore": dff_zscore
+    })
+
+    return df_out

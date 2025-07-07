@@ -56,6 +56,11 @@ df_bnc = pd.read_csv(nph_bnc_path)
 region_number = 3
 region_number = 4
 
+
+
+
+alldata = pd.read_csv('/home/kceniabougrova/Downloads/KB_sessions_insertions_map - sessions_table(1).csv')
+
 #%%
 
 
@@ -173,14 +178,89 @@ raw_timestamps_nph_415 = df_415["Timestamp"]
 raw_TTL_bpod = tbpod
 raw_TTL_nph = tph
 
-my_array = np.c_[raw_timestamps_bpod, raw_reference, raw_signal]
+# my_array = np.c_[raw_timestamps_bpod, raw_reference, raw_signal]
+my_array = np.column_stack((raw_timestamps_bpod, raw_reference, raw_signal))
 
 df_nph = pd.DataFrame(my_array, columns=['times', 'raw_isosbestic', 'raw_calcium']) #IMPORTANT DF
 
 plt.figure(figsize=(20, 6))
-plt.plot(df_nph['times'][200:1000], df_nph['calcium_mad'][200:1000], linewidth=1.25, alpha=0.8, color='teal') 
-plt.plot(df_nph['times'][200:1000], df_nph['isosbestic_mad'][200:1000], linewidth=1.25, alpha=0.8, color='purple') 
+plt.plot(df_nph['times'][200:1000], df_nph['raw_calcium'][200:1000], linewidth=1.25, alpha=0.8, color='teal') 
+plt.plot(df_nph['times'][200:1000], df_nph['raw_isosbestic'][200:1000], linewidth=1.25, alpha=0.8, color='purple') 
 plt.show() 
+
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+
+
+
+
+
+
+
+# ==========================================
+# 1) Preprocess over the entire continuous signal
+# ==========================================
+df_global = preprocess_photometry(df_nph)
+
+# ==========================================
+# 2) Preprocess per trial
+# ==========================================
+dfs = []
+for trial, df_trial in df_nph.groupby("trial_number"):
+    df_clean = preprocess_photometry(df_trial)
+    df_clean["trial_number"] = trial
+    dfs.append(df_clean)
+
+df_per_trial = pd.concat(dfs, ignore_index=True)
+
+# ==========================================
+# 3) Prepare raw signal
+# ==========================================
+times = df_nph["times"].values
+raw_calcium = df_nph["raw_calcium"].values
+
+# ==========================================
+# 4) Define event times (tbpod)
+# ==========================================
+# done before 
+
+# ==========================================
+# 5) Plot comparison
+# ==========================================
+fig, axs = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
+
+# --- Raw signal ---
+axs[0].plot(times, raw_calcium, color="gray", alpha=0.7)
+axs[0].set_title("Raw Calcium Signal")
+axs[0].set_ylabel("Raw Fluorescence")
+
+# --- Global preprocessing ---
+axs[1].plot(df_global["times"], df_global["dff_zscore"], color="blue", alpha=0.7)
+axs[1].set_title("Global Preprocessing (entire signal)")
+axs[1].set_ylabel("ΔF/F (z-score)")
+
+# --- Per-trial preprocessing ---
+axs[2].plot(df_per_trial["times"], df_per_trial["dff_zscore"], color="green", alpha=0.7)
+axs[2].set_title("Per-Trial Preprocessing")
+axs[2].set_ylabel("ΔF/F (z-score)")
+axs[2].set_xlabel("Time (s)")
+
+# --- Add vertical lines for event times ---
+for ax in axs:
+    for t in tbpod:
+        ax.axvline(t, color="black", alpha=0.5, linewidth=0.5)
+plt.xlim(1510,1550)
+plt.tight_layout()
+plt.show()
+
+
+
+
+
+
+
 
 """ SELECT THE EVENT AND WHAT INTERVAL TO PLOT IN THE PSTH """ 
 EVENT = "feedback_times" 
@@ -209,6 +289,7 @@ event_idx = np.searchsorted(array_timestamps, event_times) #check idx where they
 psth_idx += event_idx
 
 
+photometry_s_1 = df_global["dff_zscore"].values[psth_idx]
 # photometry_s_1 = df_nph.calcium_photobleach.values[psth_idx] 
 # # np.save(f'/mnt/h0/kb/data/psth_npy/preprocess_calcium_photobleach_{EVENT}_{mouse}_{date}_{region}_{eid}.npy', photometry_s_1)
 # photometry_s_2 = df_nph.isosbestic_photobleach.values[psth_idx] 
