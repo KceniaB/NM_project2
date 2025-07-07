@@ -31,6 +31,10 @@ from brainbox.io.one import SessionLoader
 import ibldsp.utils
 import scipy.signal
 from iblutil.numerical import rcoeff
+from functions import *
+import sys
+sys.path.insert(0, "/home/kceniabougrova/Documents/GitHub/ibl-photometry/src")
+
 from one.api import ONE #always after the imports 
 # one = ONE(cache_dir="/mnt/h0/kb/data/one") 
 one = ONE() 
@@ -113,9 +117,9 @@ df_nph = LedState_or_Flags(df_nph)
 """ 4.1.2 Check for LedState/previous Flags bugs """ 
 """ 4.1.2.1 Length """
 # Verify the length of the data of the 2 different LEDs
-df_470, df_415 = kcenia.verify_length(df_nph)
+df_470, df_415 = verify_length(df_nph)
 """ 4.1.2.2 Verify if there are repeated flags """ 
-kcenia.verify_repetitions(df_nph["LedState"])
+verify_repetitions(df_nph["LedState"])
 """ 4.1.3 Remove "weird" data (flag swap, huge signal) """ 
 # session_day=rec.date
 # plot_outliers(df_470,df_415,region,mouse,session_day) 
@@ -172,52 +176,6 @@ raw_TTL_nph = tph
 my_array = np.c_[raw_timestamps_bpod, raw_reference, raw_signal]
 
 df_nph = pd.DataFrame(my_array, columns=['times', 'raw_isosbestic', 'raw_calcium']) #IMPORTANT DF
-
-from iblphotometry.preprocessing import preprocessing_alejandro, jove2019, psth, preprocess_sliding_mad, photobleaching_lowpass 
-
-# def jove2019(raw_calcium, raw_isosbestic, fs, **params):
-#     """
-#     Martianova, Ekaterina, Sage Aronson, and Christophe D. Proulx. "Multi-fiber photometry to record neural activity in freely-moving animals." JoVE (Journal of Visualized Experiments) 152 (2019): e60278.
-#     :param raw_calcium:
-#     :param raw_isosbestic:
-#     :param params:
-#     :return:
-#     """
-#     # the first step is to remove the photobleaching w
-#     sos = scipy.signal.butter(fs=fs, output='sos', **params.get('butterworth_lowpass', {'N': 3, 'Wn': 0.01, 'btype': 'lowpass'}))
-#     calcium = raw_calcium - scipy.signal.sosfiltfilt(sos, raw_calcium)
-#     isosbestic = raw_isosbestic - scipy.signal.sosfiltfilt(sos, raw_isosbestic)
-#     calcium = (calcium - np.median(calcium)) / np.std(calcium)
-#     isosbestic = (isosbestic - np.median(isosbestic)) / np.std(isosbestic)
-#     m = np.polyfit(isosbestic, calcium, 1)
-#     ref = isosbestic * m[0] + m[1]
-#     ph = (calcium - ref) / 100
-#     return ph
-
-# def preprocessing_alejandro(f_ca, fs, window=30):
-#     # https://www.biorxiv.org/content/10.1101/2024.02.26.582199v1
-#     """
-#     Fluorescence signals recorded during each session from each location were
-#     transformed to dF/F using the following formula: dF = (F-F0)/F0
-#     𝐹0 was the +/- 30 s rolling average of the raw fluorescence signal.
-#     """
-#     # Convert to Series to apply the rolling avg
-#     f_ca = pd.Series(f_ca)
-#     f0 = f_ca.rolling(int(fs * window), center=True).mean()
-#     delta_f = (f_ca - f0) / f0
-#     # Convert to numpy for output
-#     delta_f = delta_f.to_numpy()
-#     return delta_f
-
-
-# df_nph['calcium_photobleach'] = photobleaching_lowpass(df_nph["raw_calcium"].values, fs=fs) #KB
-# df_nph['isosbestic_photobleach'] = photobleaching_lowpass(df_nph["raw_isosbestic"], fs=fs)
-# df_nph['calcium_jove2019'] = jove2019(df_nph["raw_calcium"], df_nph["raw_isosbestic"], fs=fs) 
-# df_nph['isosbestic_jove2019'] = jove2019(df_nph["raw_isosbestic"], df_nph["raw_calcium"], fs=fs)
-df_nph['calcium_mad'] = preprocess_sliding_mad(df_nph["raw_calcium"].values, df_nph["times"].values, fs=fs)
-df_nph['isosbestic_mad'] = preprocess_sliding_mad(df_nph["raw_isosbestic"].values, df_nph["times"].values, fs=fs)
-# df_nph['calcium_alex'] = preprocessing_alejandro(df_nph["raw_calcium"], fs=fs) 
-# df_nph['isos_alex'] = preprocessing_alejandro(df_nph['raw_isosbestic'], fs=fs)
 
 plt.figure(figsize=(20, 6))
 plt.plot(df_nph['times'][200:1000], df_nph['calcium_mad'][200:1000], linewidth=1.25, alpha=0.8, color='teal') 

@@ -5,9 +5,16 @@
 Functions to use within this repo
 
 """
+import pandas as pd
+import numpy as np
+
+from one.api import ONE #always after the imports 
+# one = ONE(cache_dir="/mnt/h0/kb/data/one") 
+one = ONE() 
+
 
 """ LOAD TRIALS """
-def load_trials_updated(eid=eid): 
+def load_trials_updated(eid): 
     trials = one.load_object(eid, 'trials')
     ref = one.eid2ref(eid)
     subject = ref.subject
@@ -90,3 +97,282 @@ def load_trials_updated(eid=eid):
 
 
 
+
+
+
+
+def get_regions(rec): 
+    """ 
+    extracts in string format the mouse name, date of the session, nph file number, bnc file number and regions
+    """
+    regions = [f"Region{rec.region}G"] 
+    return regions
+
+
+def get_nph(source_path, rec): 
+    # source_folder = (f"/home/kceniabougrova/Documents/nph/{rec.date}/")
+    source_folder = source_path
+    df_nph = pd.read_csv(source_folder+f"raw_photometry{rec.nph_file}.csv") 
+    df_nphttl = pd.read_csv(source_folder+f"bonsai_DI{rec.nph_bnc}{rec.nph_file}.csv") 
+    return df_nph, df_nphttl 
+
+def get_eid(rec): 
+    eids = one.search(subject=rec.mouse, date=rec.date) 
+    eid = eids[0]
+    ref = one.eid2ref(eid)
+    print(eid)
+    print(ref) 
+    # session_path_behav = f'/home/kceniabougrova/Documents/nph/Behav_2024Mar20/{rec.mouse}/{rec.date}/001/' 
+    base_path = f'/mnt/h0/kb/data/one/mainenlab/Subjects/{rec.mouse}/{rec.date}/' 
+    session_path_pattern = f'{base_path}00*/'
+    session_paths = glob.glob(session_path_pattern)
+    if session_paths:
+        session_path_behav = session_paths[0]  # or handle multiple matches as needed
+    else:
+        session_path_behav = None  # or handle the case where no matching path is found
+    file_path = '/mnt/h0/kb/data/one/mainenlab/Subjects/ZFM-04022/2022-12-30/001/alf/_ibl_trials.table.pqt'
+    df = pd.read_parquet(file_path)
+
+
+
+
+    
+    df_alldata = extract_all(session_path_behav)
+    table_data = df_alldata[0]['table']
+    trials = pd.DataFrame(table_data) 
+    return eid, trials 
+    
+def get_ttl(df_DI0, df_trials): 
+    if 'Value.Value' in df_DI0.columns: #for the new ones
+        df_DI0 = df_DI0.rename(columns={"Value.Seconds": "Seconds", "Value.Value": "Value"})
+    else:
+        df_DI0["Timestamp"] = df_DI0["Seconds"] #for the old ones
+    #use Timestamp from this part on, for any of the files
+    raw_phdata_DI0_true = df_DI0[df_DI0.Value==True]
+    df_raw_phdata_DI0_T_timestamp = pd.DataFrame(raw_phdata_DI0_true, columns=["Timestamp"])
+    # raw_phdata_DI0_true = pd.DataFrame(df_DI0.Timestamp[df_DI0.Value==True], columns=['Timestamp'])
+    df_raw_phdata_DI0_T_timestamp = df_raw_phdata_DI0_T_timestamp.reset_index(drop=True) 
+    tph = df_raw_phdata_DI0_T_timestamp.values[:, 0] 
+    tbpod = np.sort(np.r_[df_trials['intervals_0'].values, df_trials['intervals_1'].values, df_trials.loc[df_trials['feedbackType'] == 1, 'feedback_times'].values])
+    return tph, tbpod 
+
+
+
+def start_2_end_1(df_photometry): 
+    """
+    input = raw photometry data
+    output = photometry dataframe without the initial flag=0, starting at flag=2, finishing at flag=1, reset_index applied 
+    """
+    df_photometry = df_photometry.reset_index(drop=True)
+    array1 = df_photometry
+    if array1["LedState"][0] == 0: 
+        array1 = array1[1:len(array1)]
+        array1 = array1.reset_index(drop=True)
+    if (array1["LedState"][0] != 2) or (array1["LedState"][0] != 1): 
+        array1 = array1[1:len(array1)]
+        array1 = array1.reset_index(drop=True)
+    if array1["LedState"][0] == 1: 
+        array1 = array1[1:len(array1)]
+        array1 = array1.reset_index(drop=True)
+    if array1["LedState"][len(array1)-1] == 2: 
+        array1 = array1[0:len(array1)-1] 
+        array1 = array1.reset_index(drop=True)
+    array2 = pd.DataFrame(array1)
+    return(array2) 
+def start_17_end_18(df_photometry): 
+    """
+    input = raw photometry data
+    output = photometry dataframe without the initial flag=16, starting at flag=17, finishing at flag=18, reset_index applied 
+    """
+    df_photometry = df_photometry.reset_index(drop=True)
+    array1 = df_photometry
+    if array1["Flags"][0] == 16: 
+        array1 = array1[1:len(array1)]
+        array1 = array1.reset_index(drop=True)
+    if array1["Flags"][0] == 18: 
+        array1 = array1[1:len(array1)]
+        array1 = array1.reset_index(drop=True)
+    if array1["Flags"][len(array1)-1] == 17: 
+        array1 = array1[0:len(array1)-1] 
+        array1 = array1.reset_index(drop=True)
+    array2 = pd.DataFrame(array1)
+    return(array2) 
+""" 4.1.1 Change the Flags that are combined to Flags that will represent only the LED that was on """ 
+"""1 and 17 are isosbestic; 2 and 18 are GCaMP"""
+def change_flags(df_with_flags): 
+    df_with_flags = df_with_flags.reset_index(drop=True)
+    if 'LedState' in df_with_flags.columns: 
+        array1 = np.array(df_with_flags["LedState"])
+        for i in range(0,len(df_with_flags)): 
+            if array1[i] == 529 or array1[i] == 273 or array1[i] == 785 or array1[i] == 17: 
+                array1[i] = 1
+            elif array1[i] == 530 or array1[i] == 274 or array1[i] == 786 or array1[i] == 18: 
+                array1[i] = 2
+            else: 
+                array1[i] = array1[i] 
+        array2 = pd.DataFrame(array1)
+        df_with_flags["LedState"] = array2
+        return(df_with_flags) 
+    else: 
+        array1 = np.array(df_with_flags["Flags"])
+        for i in range(0,len(df_with_flags)): 
+            if array1[i] == 529 or array1[i] == 273 or array1[i] == 785 or array1[i] == 17: 
+                array1[i] = 1
+            elif array1[i] == 530 or array1[i] == 274 or array1[i] == 786 or array1[i] == 18: 
+                array1[i] = 2
+            else: 
+                array1[i] = array1[i] 
+        array2 = pd.DataFrame(array1)
+        df_with_flags["Flags"] = array2
+        return(df_with_flags) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#%%
+
+def LedState_or_Flags(df_PhotometryData): 
+    if 'LedState' in df_PhotometryData.columns:                         #newversion 
+        df_PhotometryData = start_2_end_1(df_PhotometryData)
+        df_PhotometryData = df_PhotometryData.reset_index(drop=True)
+        df_PhotometryData = (change_flags(df_PhotometryData))
+    else:                                                               #oldversion
+        df_PhotometryData = start_17_end_18(df_PhotometryData) 
+        df_PhotometryData = df_PhotometryData.reset_index(drop=True) 
+        df_PhotometryData = (change_flags(df_PhotometryData))
+        df_PhotometryData["LedState"] = df_PhotometryData["Flags"]
+    return df_PhotometryData
+
+
+def verify_length(df_PhotometryData): 
+    """
+    Checking if the length is different
+    x = df_470
+    y = df_415
+    """ 
+    x = df_PhotometryData[df_PhotometryData.LedState==2]
+    y = df_PhotometryData[df_PhotometryData.LedState==1] 
+    if len(x) == len(y): 
+        print("Option 1: same length :)")
+    else: 
+        print("Option 2: SOMETHING IS WRONG! Different len's") 
+    print("470 = ",x.LedState.count()," 415 = ",y.LedState.count())
+    return(x,y)
+
+
+def verify_repetitions(x): 
+    """
+    Checking if there are repetitions in consecutive rows
+    x = df_PhotometryData["Flags"]
+    """ 
+    for i in range(1,(len(x)-1)): 
+        if x[i-1] == x[i]: 
+            print("here: ", i)
+
+
+
+def find_FR(x): 
+    """
+    find the frame rate of acquisition
+    x = df_470["Timestamp"]
+    """
+    acq_FR = round(1/np.mean(x.diff()))
+    # check to make sure that it is 15/30/60! (- with a loop)
+    if acq_FR == 30 or acq_FR == 60 or acq_FR == 120: 
+        print("All good, the FR is: ", acq_FR)
+    else: 
+        print("CHECK FR!!!!!!!!!!!!!!!!!!!!") 
+    return acq_FR 
+
+
+
+
+
+
+
+
+# %% 
+""" 
+Different pre-processing methods for the photometry signal
+"""
+def jove2019(raw_calcium, raw_isosbestic, fs, **params):
+    """
+    Martianova, Ekaterina, Sage Aronson, and Christophe D. Proulx. "Multi-fiber photometry to record neural activity in freely-moving animals." JoVE (Journal of Visualized Experiments) 152 (2019): e60278.
+    :param raw_calcium:
+    :param raw_isosbestic:
+    :param params:
+    :return:
+    """
+    # the first step is to remove the photobleaching w
+    sos = scipy.signal.butter(fs=fs, output='sos', **params.get('butterworth_lowpass', {'N': 3, 'Wn': 0.01, 'btype': 'lowpass'}))
+    calcium = raw_calcium - scipy.signal.sosfiltfilt(sos, raw_calcium)
+    isosbestic = raw_isosbestic - scipy.signal.sosfiltfilt(sos, raw_isosbestic)
+    calcium = (calcium - np.median(calcium)) / np.std(calcium)
+    isosbestic = (isosbestic - np.median(isosbestic)) / np.std(isosbestic)
+    m = np.polyfit(isosbestic, calcium, 1)
+    ref = isosbestic * m[0] + m[1]
+    ph = (calcium - ref) / 100
+    return ph
+
+def preprocessing_alejandro(f_ca, fs, window=30):
+    # https://www.biorxiv.org/content/10.1101/2024.02.26.582199v1
+    """
+    Fluorescence signals recorded during each session from each location were
+    transformed to dF/F using the following formula: dF = (F-F0)/F0
+    𝐹0 was the +/- 30 s rolling average of the raw fluorescence signal.
+    """
+    # Convert to Series to apply the rolling avg
+    f_ca = pd.Series(f_ca)
+    f0 = f_ca.rolling(int(fs * window), center=True).mean()
+    delta_f = (f_ca - f0) / f0
+    # Convert to numpy for output
+    delta_f = delta_f.to_numpy()
+    return delta_f
+
+""" previously used functions """
+# df_nph['calcium_photobleach'] = photobleaching_lowpass(df_nph["raw_calcium"].values, fs=fs) #KB
+# df_nph['isosbestic_photobleach'] = photobleaching_lowpass(df_nph["raw_isosbestic"], fs=fs)
+# df_nph['calcium_jove2019'] = jove2019(df_nph["raw_calcium"], df_nph["raw_isosbestic"], fs=fs) 
+# df_nph['isosbestic_jove2019'] = jove2019(df_nph["raw_isosbestic"], df_nph["raw_calcium"], fs=fs)
+# df_nph['calcium_mad'] = preprocess_sliding_mad(df_nph["raw_calcium"].values, df_nph["times"].values, fs=fs)
+# df_nph['isosbestic_mad'] = preprocess_sliding_mad(df_nph["raw_isosbestic"].values, df_nph["times"].values, fs=fs)
+# df_nph['calcium_alex'] = preprocessing_alejandro(df_nph["raw_calcium"], fs=fs) 
+# df_nph['isos_alex'] = preprocessing_alejandro(df_nph['raw_isosbestic'], fs=fs) 
+
+
+
+# current code in the iblphotometry preprocessing file #the rest of the functions were removed 
+# https://github.com/int-brain-lab/ibl-photometry/blob/f6f479a479ce327e6ba485ca449b19299795a86b/src/iblphotometry/preprocessing.py
+
+import scipy.signal
+
+
+def low_pass_filter(raw_signal, fs):
+    params = {}
+    sos = scipy.signal.butter(
+        fs=fs,
+        output='sos',
+        **params.get('butterworth_lowpass', {'N': 3, 'Wn': 0.01, 'btype': 'lowpass'}),
+    )
+    signal_lp = scipy.signal.sosfiltfilt(sos, raw_signal)
+    return signal_lp
+
+
+def mad_raw_signal(raw_signal, fs):
+    # This is a convenience function to get going whilst the preprocessing refactoring is being done
+    # TODO delete this function once processing can be applied
+    signal_lp = low_pass_filter(raw_signal, fs)
+    signal_processed = (raw_signal - signal_lp) / signal_lp
+    return signal_processed
