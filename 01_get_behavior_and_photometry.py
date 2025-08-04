@@ -7,10 +7,12 @@ KB - 2025-July-04
 # %%
 '/media/kceniabougrova/Seagate Basic/IBL_server_PC_20250529/kb/data/external_drive' 
 
+'/home/kceniabougrova/Documents/NM_project_fromIBLserver/NM_project2/KB_sessions_insertions_map - upload.csv'
 #%%
 """
 KceniaBougrova 
-08October2024 
+08October2024
+30July2025 updated/optimized
 
 1. LOAD THE BEHAVIOR AND PHOTOMETRY FILES
 2. ADD BEHAVIOR VARIABLES 
@@ -41,6 +43,38 @@ one = ONE()
 
 """ useful""" 
 # eids = one.search(project='ibl_fibrephotometry') 
+
+#%%
+#===========================================================================
+#                            Pick data from table 
+#===========================================================================
+
+table_path = '/home/kceniabougrova/Documents/NM_project_fromIBLserver/NM_project2/KB_sessions_insertions_map - upload.csv'
+sessions_list = pd.read_csv(table_path)
+
+def select_one_session(sessions_list=sessions_list, row=150): 
+    eid = sessions_list.loc[row, "eid"]
+    subject = sessions_list.loc[row, "subject"]
+    date = sessions_list.loc[row, "date"]
+    region = sessions_list.loc[row, "region"]
+    nph_file_path = sessions_list.loc[row, "photometry_path_a"]
+    nph_bnc_path = sessions_list.loc[row, "digital_inputs_path"]
+    return eid, subject, date, region, nph_file_path, nph_bnc_path
+
+
+eid, subject, date, region, nph_file_path, nph_bnc_path = select_one_session(row=450)
+# Replace the prefix in the paths if needed
+old_prefix = '/mnt/h0/kb/'
+new_prefix = '/media/kceniabougrova/Seagate Basic/IBL_server_PC_20250529/kb/'
+
+nph_file_path = nph_file_path.replace(old_prefix, new_prefix)
+nph_bnc_path = nph_bnc_path.replace(old_prefix, new_prefix)
+
+# Load the CSVs
+df_nph = pd.read_csv(nph_file_path)
+df_bnc = pd.read_csv(nph_bnc_path)
+
+
 
 #%%
 """ EDIT THE VARS - eid, ROI, photometry file path (.csv or .pqt) """
@@ -207,6 +241,14 @@ df_global = preprocess_photometry(df_nph)
 # ==========================================
 # 2) Preprocess per trial
 # ==========================================
+#####
+""" but first, include a column with the trial number - 30072025"""
+""" create a column with the trial number in the nph df """
+df_nph["trial_number"] = 0 #create a new column for the trial_number 
+df_nph.loc[idx_event,"trial_number"]=1
+df_nph["trial_number"] = df_nph.trial_number.cumsum() #sum the [i-1] to i in order to get the trial number 
+
+#####
 dfs = []
 for trial, df_trial in df_nph.groupby("trial_number"):
     df_clean = preprocess_photometry(df_trial)
@@ -357,3 +399,179 @@ plot_heatmap_psth(df_nph.calcium_mad)
 
 
 # %%
+#===========================================================================
+#                            Photometry done
+#                       now link it to the behavior 
+#===========================================================================
+
+
+PERIEVENT_WINDOW = [-1, 2]
+EVENT = "feedback_times"
+#load data 
+behav = pd.read_parquet('/mnt/h0/kb/data/one/mainenlab/Subjects/ZFM-05236/2023-07-03/001/alf/_ibl_trials.table.pqt') 
+
+
+#preprocess data 
+fs = 1 / np.median(np.diff(nph.times.values))
+nph_j = jove2019(nph.raw_calcium, nph.raw_isosbestic, fs=fs) 
+# nph_j = preprocess_sliding_mad(nph.raw_calcium.values, nph.times.values, fs=fs)
+nph["calcium"] = nph_j 
+
+plt.figure(figsize=(20, 8))
+plt.plot(nph.times, nph.calcium, c='teal', alpha=0.85, linewidth=0.2)
+for i in behav.feedback_times: 
+    plt.axvline(x=i, linewidth=0.2, color='black', alpha=0.75) 
+plt.show() 
+
+
+#create psth #OPTION1 
+
+photometry_feedback, idx_psth = psth(
+    calcium=nph.calcium.values,
+    times=nph.times.values, t_events=behav[EVENT].values, fs=fs, peri_event_window =PERIEVENT_WINDOW) 
+
+plt.figure(figsize=(15, 8))
+plt.plot(photometry_feedback, color='black', linewidth=0.3, alpha=0.3) 
+plt.axvline(x=30)
+plt.show()
+
+#check peak, time, mad 
+
+ipeaks_1, maxis = parabolic_max(photometry_feedback.T)
+tmax = ipeaks_1 / fs + PERIEVENT_WINDOW[0]
+plt.figure(figsize=(10, 5))
+
+plt.matshow(photometry_feedback)
+plt.plot(np.arange(ipeaks_1.shape[0]), ipeaks_1, '*r')
+def mad(arr, axis=None, keepdims=True):
+    median = np.median(arr, axis=axis, keepdims=True)
+    mad = np.median(np.abs(arr-median),axis=axis, keepdims=keepdims)
+    return mad
+ipeaks=[] 
+mads=[]
+for i in range(len(photometry_feedback)): 
+    ipeaks.append(np.argmax(photometry_feedback[i])) #indices of max values along axis
+    mads.append(mad(photometry_feedback[i]))
+
+
+
+#%% 
+"""
+KB 20240709 
+adding some more behav columns 
+""" 
+#createtrialNumber
+behav['trialNumber'] = range(1, len(behav) + 1)
+idx=2 #column position 
+new_col = behav['contrastLeft'].fillna(behav['contrastRight']) 
+behav.insert(loc=idx, column='allContrasts', value=new_col) 
+#create allUContrasts 
+behav['allUContrasts'] = behav['allContrasts']
+behav.loc[behav['contrastRight'].isna(), 'allUContrasts'] = behav['allContrasts'] * -1
+behav.insert(loc=3, column='allUContrasts', value=behav.pop('allUContrasts'))
+#create reactionTime 
+reactionTime = np.array((behav["firstMovement_times"])-(behav["stimOn_times"]))
+behav["reactionTime"] = reactionTime 
+
+event_time = 30 
+
+psth_fastest_100 = nph.calcium.values[idx_psth[:,((behav.reactionTime >= 0.25) & (behav.reactionTime < 0.3) & (behav.feedbackType == 1) & (behav.allContrasts == 1))]]
+psth_fastest_25 = nph.calcium.values[idx_psth[:,((behav.reactionTime >= 0.25) & (behav.reactionTime < 0.3) & (behav.feedbackType == 1) & (behav.allContrasts == 0.25))]]
+psth_fastest_12 = nph.calcium.values[idx_psth[:,((behav.reactionTime >= 0.25) & (behav.reactionTime < 0.3) & (behav.feedbackType == 1) & (behav.allContrasts == 0.125))]]
+psth_fastest_6 = nph.calcium.values[idx_psth[:,((behav.reactionTime >= 0.25) & (behav.reactionTime < 0.3) & (behav.feedbackType == 1) & (behav.allContrasts == 0.0625))]]
+psth_fastest_0 = nph.calcium.values[idx_psth[:,((behav.reactionTime >= 0.25) & (behav.reactionTime < 0.3) & (behav.feedbackType == 1) & (behav.allContrasts == 0))]]
+# psth_fastest_100 = df_nph.calcium.values[psth_idx[:,((df_trials.reactionTime >= 0.3) & (df_trials.reactionTime < 0.5) & (df_trials.feedbackType == 1) & (df_trials.allContrasts == 1))]]
+# psth_fastest_25 = df_nph.calcium.values[psth_idx[:,((df_trials.reactionTime >= 0.3) & (df_trials.reactionTime < 0.5) & (df_trials.feedbackType == 1) & (df_trials.allContrasts == 0.25))]]
+# psth_fastest_12 = df_nph.calcium.values[psth_idx[:,((df_trials.reactionTime >= 0.3) & (df_trials.reactionTime < 0.5) & (df_trials.feedbackType == 1) & (df_trials.allContrasts == 0.125))]]
+# psth_fastest_6 = df_nph.calcium.values[psth_idx[:,((df_trials.reactionTime >= 0.3) & (df_trials.reactionTime < 0.5) & (df_trials.feedbackType == 1) & (df_trials.allContrasts == 0.0625))]]
+# psth_fastest_0 = df_nph.calcium.values[psth_idx[:,((df_trials.reactionTime >= 0.3) & (df_trials.reactionTime < 0.5) & (df_trials.feedbackType == 1) & (df_trials.allContrasts == 0))]]
+
+
+
+width_ratios = [1, 1]
+FONTSIZE_1 = 30
+FONTSIZE_2 = 25
+FONTSIZE_3 = 15 
+
+data = nph.calcium.values[idx_psth]
+event_time = 30 
+
+from numpy import nanmean
+average_values = nanmean(data,axis=1)
+
+plt.plot(average_values, color='black')
+plt.xlabel('time since event (s)', fontsize=FONTSIZE_2)
+plt.ylabel('zdFF', fontsize=FONTSIZE_2)
+plt.axvline(x=event_time, color="black", alpha=0.9, linewidth=3, linestyle="dashed")
+plt.grid(False) 
+
+
+psth_error = nph.calcium.values[idx_psth[:,(behav.feedbackType == -1)]]
+psth_good = nph.calcium.values[idx_psth[:,(behav.feedbackType == 1)]]
+
+"""#########################################################################################################################################"""
+""" WORKED 
+Plot heatmap for correct and incorrect 
+"""
+psth_good_avg = psth_good.mean(axis=1) 
+sem_A = psth_good.std(axis=1) / np.sqrt(psth_good.shape[1]) 
+
+ax = sns.heatmap(psth_good.T, cbar=True)
+ax.invert_yaxis()
+plt.axvline(x=30, color = "black", alpha=0.9, linewidth = 3, linestyle="dashed") 
+plt.title("Heatmap for correct trials")
+plt.show()
+ 
+ax = sns.heatmap(psth_error.T, cbar=True)
+ax.invert_yaxis()
+plt.axvline(x=30, color = "black", alpha=0.9, linewidth = 3, linestyle="dashed") 
+plt.title("Heatmap for incorrect trials")
+plt.show() 
+
+
+
+
+
+
+"""#########################################################################################################################################"""
+"""##### scatter of max and min peaks divided by correct and incorrect ##########################################################"""
+""" WORKED
+Figure X1. where is the max peak around the event? 
+"""
+ipeaks_1, maxis = parabolic_max(psth_good.T)
+tmax = ipeaks_1 / fs + PERIEVENT_WINDOW[0]
+
+ipeaks_2, maxis_2 = parabolic_max(psth_error.T)
+tmax_2 = ipeaks_2 / fs + PERIEVENT_WINDOW[0]
+
+import matplotlib as mpl
+mpl.rcParams['axes.spines.right'] = False
+mpl.rcParams['axes.spines.top'] = False
+plt.scatter(tmax, maxis, color='#0f7173', alpha=0.5, label='correct') 
+plt.scatter(tmax_2, maxis_2, color='#f05d5e', alpha=0.5, label='incorrect')
+plt.axvline(x=0, linestyle='dashed', color='black')
+
+plt.title("max peak values divided by correct and incorrect")
+plt.legend()
+plt.show()
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+""" WORKED 
+Figure X2. where is the min peak around the event? 
+""" 
+ipeaks_3, minis = parabolic_max(-(psth_good.T))
+tmin = ipeaks_3 / fs + PERIEVENT_WINDOW[0]
+
+ipeaks_4, minis_2 = parabolic_max(-(psth_error.T))
+tmin_2 = ipeaks_4 / fs + PERIEVENT_WINDOW[0]
+
+mpl.rcParams['axes.spines.right'] = False
+mpl.rcParams['axes.spines.top'] = False
+plt.scatter(tmin, minis, color='#0f7173', alpha=0.5, label='correct') 
+plt.scatter(tmin_2, minis_2, color='#f05d5e', alpha=0.5, label='incorrect')
+plt.axvline(x=0, linestyle='dashed', color='black') 
+
+plt.title("min peak values divided by correct and incorrect")
+plt.legend()
+plt.show() 
+
