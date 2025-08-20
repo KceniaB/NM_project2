@@ -247,9 +247,9 @@ smooth_signal = smooth_signal(raw_signal, smooth_win)
 
 fig = plt.figure(figsize=(16, 10))
 ax1 = fig.add_subplot(211)
-ax1.plot(smooth_signal,'blue',linewidth=1.5)
+ax1.plot(smooth_signal,'blue',linewidth=0.5)
 ax2 = fig.add_subplot(212)
-ax2.plot(smooth_reference,'purple',linewidth=1.5)
+ax2.plot(smooth_reference,'purple',linewidth=0.5)
 
 
 #%%
@@ -356,7 +356,7 @@ behav = df_trials
 photometry_feedback, idx_psth = psth(
     calcium=nph.zdFF.values,
     times=nph.times.values,
-    t_events=behav["intervals_0"].values,
+    t_events=behav["feedback_times"].values,
     fs=fs,
     peri_event_window=[-1, 2]
 )
@@ -374,7 +374,9 @@ plt.show()
 
 PERIEVENT_WINDOW = [-1, 2]
 
-time_axis = np.arange(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], 1/fs)
+# time_axis = np.arange(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], 1/fs)
+n_timepoints = photometry_feedback.shape[0]
+time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
 
 plt.figure(figsize=(15, 8))
 plt.plot(time_axis, photometry_feedback, color='black', linewidth=0.3, alpha=0.3)
@@ -388,7 +390,7 @@ plt.xlabel("Time (s)")
 
 
 """ SELECT THE EVENT AND WHAT INTERVAL TO PLOT IN THE PSTH """ 
-EVENT = "feedback_times" 
+EVENT = "stimOnTrigger_times" 
 time_bef = -1
 time_aft = 2
 PERIEVENT_WINDOW = [time_bef,time_aft]
@@ -471,8 +473,6 @@ plot_heatmap_psth(df_nph.zdFF)
 """ 
 to sort by: reactionTimes 
 """ 
-
-# %%
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -711,14 +711,31 @@ for _, trial in df_trials.iterrows():
 df_trials['zdff_drop_pre_stim'] = zdff_drops
 
 df_trials['correct'] = df_trials['feedbackType'] == 1
-df_trials['consecutive_correct'] = df_trials['correct'].astype(int).rolling(window=2).sum().fillna(0)
+# df_trials['consecutive_correct'] = df_trials['correct'].astype(int).rolling(window=2).sum().fillna(0)
 
+# Counter for consecutive corrects before current trial
+consec = []
+count = 0
+for c in df_trials['correct']:
+    consec.append(count)  # store count BEFORE updating
+    if c:
+        count += 1
+    else:
+        count = 0
+
+df_trials['consecutive_correct'] = consec
+
+# Add previous trial's quiescence time
+df_trials['prev_quiescenceTime'] = df_trials['quiescenceTime'].shift(1)
+
+# Add previous trial's full trial time
+df_trials['prev_trialTime'] = df_trials['trialTime'].shift(1)
 
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
 # Choose predictors
-X = df_trials[['quiescenceTime', 'trialTime', 'reactionTime', 'consecutive_correct']]
+X = df_trials[['quiescenceTime', 'reactionTime', 'consecutive_correct', 'prev_quiescenceTime', 'prev_trialTime']]
 X = X.fillna(0)  # handle NaNs
 
 # Add correctness as binary
@@ -745,13 +762,616 @@ coeffs = pd.Series(model.coef_, index=X.columns)
 print("Model coefficients:\n", coeffs.sort_values(key=abs, ascending=False))
 
 import seaborn as sns
-sns.scatterplot(data=df_trials, x='quiescenceTime', y='zdff_drop_pre_stim', hue='feedbackType')
+sns.scatterplot(data=df_trials, x='quiescenceTime', y='zdff_drop_pre_stim', hue='feedbackType', alpha=0.8)
 
-sns.pairplot(df_trials, vars=['zdff_drop_pre_stim', 'quiescenceTime', 'trialTime', 'reactionTime', 'consecutive_correct'], hue='correct')
-
-
+sns.pairplot(df_trials, vars=['zdff_drop_pre_stim', 'quiescenceTime', 'reactionTime', 'consecutive_correct', 'prev_quiescenceTime', 'prev_trialTime'], hue='correct')
 
 
+from sklearn.inspection import PartialDependenceDisplay
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+
+# Fit Random Forest again
+rf = RandomForestRegressor(random_state=42, n_estimators=300)
+rf.fit(X_scaled, y)
+
+# Plot PDP for all features
+fig, ax = plt.subplots(figsize=(12, 8))
+PartialDependenceDisplay.from_estimator(rf, X_scaled, [0, 1, 2, 3],
+                                        feature_names=X.columns, ax=ax)
+plt.suptitle("Partial Dependence Plots (Random Forest)", fontsize=14)
+plt.show()
+
+
+import shap
+
+# Create SHAP explainer
+explainer = shap.TreeExplainer(rf)
+shap_values = explainer.shap_values(X_scaled)
+
+# Summary plot (global importance + direction of effect)
+shap.summary_plot(shap_values, X, feature_names=X.columns)
+
+# Dependence plot (feature vs its SHAP value)
+shap.dependence_plot("quiescenceTime", shap_values, X, feature_names=X.columns)
+
+
+
+
+
+#%%
+"""
+20August2025
+more features 
+""" 
+# %%
+"""
+Pipeline to predict zdFF drop before stimOnTrigger_times
+with multiple models and extended feature set (A–D).
+"""
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression, LassoCV, ElasticNetCV
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.svm import SVR
+from sklearn.metrics import mean_squared_error, r2_score
+
+# ==========================================================
+# 1. FEATURE ENGINEERING
+# ==========================================================
+
+# ---- Current trial (A)
+df_trials['quiescencePeriod'] = df_trials['quiescencePeriod']
+df_trials['quiescenceTime']   = df_trials['quiescenceTime']
+df_trials['trialTime']        = df_trials['trialTime']
+
+# ---- Previous trial (B)
+shift_cols = [
+    'quiescenceTime', 'trialTime', 'feedbackType', 'choice',
+    'allContrasts', 'allSContrasts', 'reactionTime',
+    'probabilityLeft', 'responseTime', 'zdff_drop_pre_stim'
+]
+for col in shift_cols:
+    df_trials[f'prev_{col}'] = df_trials[col].shift(1)
+
+# ---- Sequential (C)
+df_trials['correct'] = (df_trials['feedbackType'] == 1).astype(int)
+
+# Consecutive correct
+consec_corr, count = [], 0
+for c in df_trials['correct']:
+    consec_corr.append(count)
+    count = count + 1 if c else 0
+df_trials['consecutive_correct'] = consec_corr
+
+# Consecutive incorrect
+consec_inc, count = [], 0
+for c in df_trials['correct']:
+    consec_inc.append(count)
+    count = count + 1 if not c else 0
+df_trials['consecutive_incorrect'] = consec_inc
+
+# ---- Interactions (D)
+df_trials['interaction_quiescence_correct'] = df_trials['quiescenceTime'] * df_trials['correct']
+df_trials['interaction_reaction_correct'] = df_trials['reactionTime'] * df_trials['correct']
+df_trials['interaction_prev_trialTime_quiescenceTime'] = df_trials['prev_trialTime'] * df_trials['quiescenceTime']
+df_trials['interaction_prev_feedbackType_quiescenceTime'] = df_trials['prev_feedbackType'] * df_trials['quiescenceTime']
+
+# ==========================================================
+# 2. DEFINE PREDICTORS + TARGET
+# ==========================================================
+
+# Collect all engineered features (exclude target + IDs)
+exclude_cols = ['zdff_drop_pre_stim', 'stimOnTrigger_times', 'subject', 'date','eid']
+feature_cols = [c for c in df_trials.columns if c not in exclude_cols]
+
+X = df_trials[feature_cols].fillna(0)
+y = df_trials['zdff_drop_pre_stim']
+
+# Drop NaNs in target
+mask = y.notna()
+X = X[mask]
+y = y[mask]
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Standardize for models that need scaling
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# ==========================================================
+# 3. TRAIN MULTIPLE MODELS
+# ==========================================================
+
+models = {
+    "LinearRegression": LinearRegression(),
+    "LassoCV": LassoCV(cv=5, random_state=42),
+    "ElasticNetCV": ElasticNetCV(cv=5, random_state=42),
+    "RandomForest": RandomForestRegressor(n_estimators=300, random_state=42),
+    "GradientBoosting": GradientBoostingRegressor(n_estimators=300, random_state=42),
+    "SVR": SVR(kernel='rbf', C=1.0, epsilon=0.1)
+}
+
+results = {}
+
+for name, model in models.items():
+    if name in ["LinearRegression", "LassoCV", "ElasticNetCV", "SVR"]:
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+    else:
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+    
+    r2 = r2_score(y_test, y_pred)
+    rmse = mean_squared_error(y_test, y_pred, squared=False)
+    results[name] = {"R2": r2, "RMSE": rmse}
+    print(f"=== {name} ===")
+    print(f"R²: {r2:.3f} | RMSE: {rmse:.3f}")
+    print()
+
+# ==========================================================
+# 4. FEATURE IMPORTANCES / COEFFICIENTS
+# ==========================================================
+
+# Linear models: coefficients
+for name in ["LinearRegression", "LassoCV", "ElasticNetCV"]:
+    model = models[name]
+    if hasattr(model, "coef_"):
+        coeffs = pd.Series(model.coef_, index=X.columns)
+        print(f"\n{name} coefficients (top 10):")
+        print(coeffs.reindex(coeffs.abs().sort_values(ascending=False).index)[:10])
+
+# Tree models: feature importances
+for name in ["RandomForest", "GradientBoosting"]:
+    model = models[name]
+    importances = pd.Series(model.feature_importances_, index=X.columns)
+    importances = importances.sort_values(ascending=False)[:15]
+    plt.figure(figsize=(8,6))
+    importances.plot(kind='barh')
+    plt.title(f"{name} - Top 15 Feature Importances")
+    plt.gca().invert_yaxis()
+    plt.show()
+
+
+
+
+
+
+
+
+#%%
+"""
+20-August-2025
+""" 
+# %%
+# %%
+"""
+Prediction of zdFF drop before stimOnTrigger_times
+"""
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression, LassoCV, ElasticNetCV
+from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+
+import shap
+from sklearn.inspection import PartialDependenceDisplay
+import xgboost as xgb
+
+# ==========================================================
+# 1. COMPUTE TARGETS (zdFF drop features per trial)
+# ==========================================================
+
+pre_window = [-0.5, 0]  # seconds relative to stim
+
+means, mins, slopes = [], [], []
+
+for _, trial in df_trials.iterrows():
+    stim_time = trial['stimOnTrigger_times']
+    start, end = stim_time + pre_window[0], stim_time + pre_window[1]
+    mask = (df_nph['times'] >= start) & (df_nph['times'] < end)
+    segment = df_nph.loc[mask, 'zdFF']
+
+    if segment.empty:
+        means.append(np.nan)
+        mins.append(np.nan)
+        slopes.append(np.nan)
+    else:
+        means.append(segment.mean())
+        mins.append(segment.min())
+        # slope = linear regression on time vs zdFF
+        t = df_nph.loc[mask, 'times'].values.reshape(-1, 1)
+        from sklearn.linear_model import LinearRegression
+        lr = LinearRegression().fit(t, segment.values)
+        slopes.append(lr.coef_[0])
+
+df_trials['zdff_drop_pre_stim_mean'] = means
+df_trials['zdff_drop_pre_stim_min'] = mins
+df_trials['zdff_drop_pre_stim_slope'] = slopes
+
+# Binary correctness
+df_trials['correct'] = (df_trials['feedbackType'] == 1).astype(int)
+
+# ==========================================================
+# 2. FEATURE ENGINEERING
+# ==========================================================
+
+# Sequential features
+consec_correct, consec_incorrect = [], []
+count_c, count_i = 0, 0
+for fb in df_trials['feedbackType']:
+    consec_correct.append(count_c)
+    consec_incorrect.append(count_i)
+    if fb == 1:
+        count_c += 1
+        count_i = 0
+    elif fb == -1:
+        count_i += 1
+        count_c = 0
+    else:
+        count_c = count_i = 0
+
+df_trials['consecutive_correct'] = consec_correct
+df_trials['consecutive_incorrect'] = consec_incorrect
+
+# Previous trial features
+for col in ['quiescenceTime', 'trialTime', 'feedbackType', 'choice',
+            'allContrasts', 'allSContrasts', 'reactionTime',
+            'probabilityLeft', 'responseTime',
+            'zdff_drop_pre_stim_mean', 'zdff_drop_pre_stim_min', 'zdff_drop_pre_stim_slope']:
+    df_trials[f'prev_{col}'] = df_trials[col].shift(1)
+
+# Interaction features
+df_trials['interaction_quiescence_correct'] = df_trials['quiescenceTime'] * df_trials['correct']
+df_trials['interaction_reaction_correct'] = df_trials['reactionTime'] * df_trials['correct']
+df_trials['interaction_prev_trialTime_quiescenceTime'] = df_trials['prev_trialTime'] * df_trials['quiescenceTime']
+df_trials['interaction_prev_feedbackType_quiescenceTime'] = df_trials['prev_feedbackType'] * df_trials['quiescenceTime']
+
+# ==========================================================
+# 3. SELECT FINAL FEATURE SET
+# ==========================================================
+
+feature_cols = [
+    # Current trial
+    'quiescencePeriod', 'quiescenceTime', 'trialTime',
+    # Previous trial
+    'prev_quiescenceTime', 'prev_trialTime', 'prev_feedbackType',
+    'prev_choice', 'prev_allContrasts', 'prev_allSContrasts',
+    'prev_reactionTime', 'prev_probabilityLeft', 'prev_responseTime',
+    'prev_zdff_drop_pre_stim_mean', 'prev_zdff_drop_pre_stim_min', 'prev_zdff_drop_pre_stim_slope',
+    # Sequential
+    'consecutive_correct', 'consecutive_incorrect',
+    # Interactions
+    'interaction_quiescence_correct', 'interaction_reaction_correct',
+    'interaction_prev_trialTime_quiescenceTime', 'interaction_prev_feedbackType_quiescenceTime'
+]
+
+# Keep only numeric features
+X = df_trials[feature_cols].select_dtypes(include=[np.number]).fillna(0)
+
+targets = {
+    "Mean": df_trials['zdff_drop_pre_stim_mean'],
+    "Min": df_trials['zdff_drop_pre_stim_min'],
+    "Slope": df_trials['zdff_drop_pre_stim_slope'],
+}
+
+# ==========================================================
+# 4. TRAINING LOOP FOR MULTIPLE TARGETS
+# ==========================================================
+
+models = {
+    "LinearRegression": LinearRegression(),
+    "LassoCV": LassoCV(cv=5, random_state=42),
+    "ElasticNetCV": ElasticNetCV(cv=5, random_state=42),
+    "SVR": SVR(kernel='rbf'),
+    "RandomForest": RandomForestRegressor(n_estimators=300, random_state=42),
+    "GradientBoosting": GradientBoostingRegressor(random_state=42),
+    "XGBoost": xgb.XGBRegressor(n_estimators=300, random_state=42)
+}
+
+all_results = {}
+
+for target_name, y in targets.items():
+    print(f"\n==================== Target: {target_name} ====================")
+
+    mask = y.notna()
+    X_target, y_target = X[mask], y[mask]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_target, y_target, test_size=0.2, random_state=42
+    )
+
+    # Scale
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    results = {}
+
+    for name, model in models.items():
+        if name in ["LinearRegression", "LassoCV", "ElasticNetCV", "SVR"]:
+            model.fit(X_train_scaled, y_train)
+            y_pred = model.predict(X_test_scaled)
+        else:
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+
+        r2 = r2_score(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        mae = mean_absolute_error(y_test, y_pred)
+
+        results[name] = {"R2": r2, "RMSE": rmse, "MAE": mae}
+        print(f"=== {name} ===")
+        print(f"R²: {r2:.3f} | RMSE: {rmse:.4f} | MAE: {mae:.4f}\n")
+
+        # Feature importance (tree models only)
+        if hasattr(model, "feature_importances_"):
+            importances = pd.Series(model.feature_importances_, index=X.columns)
+            importances = importances.sort_values(ascending=False)
+            plt.figure(figsize=(8, 6))
+            sns.barplot(x=importances, y=importances.index, color="skyblue")
+            plt.title(f"Feature Importances ({name}) - {target_name}")
+            plt.tight_layout()
+            plt.show()
+
+            # SHAP for tree models
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_train)
+            shap.summary_plot(shap_values, X_train, feature_names=X.columns, show=False)
+            plt.title(f"SHAP Summary - {name} ({target_name})")
+            plt.show()
+
+            # PDP for top 3 features
+            top_features = importances.index[:3].tolist()
+            fig, ax = plt.subplots(figsize=(12, 6))
+            PartialDependenceDisplay.from_estimator(
+                model, X_train, top_features, feature_names=X.columns, ax=ax
+            )
+            plt.suptitle(f"PDP ({name}) - {target_name}", fontsize=14)
+            plt.show()
+
+    all_results[target_name] = results
+
+# Final results summary
+print("\n===== ALL RESULTS =====")
+for target, res in all_results.items():
+    print(f"\nTarget: {target}")
+    for model, metrics in res.items():
+        print(f"{model}: R²={metrics['R2']:.3f}, RMSE={metrics['RMSE']:.4f}, MAE={metrics['MAE']:.4f}")
+
+# %%
+# ==========================================================
+# 5. Select Best Model per Target
+# ==========================================================
+
+print("\n===== BEST MODELS PER TARGET =====")
+best_models = {}
+
+for target, res in all_results.items():
+    # Pick model with highest R²
+    best_model = max(res.items(), key=lambda x: x[1]['R2'])
+    best_models[target] = best_model
+    print(f"{target}: {best_model[0]} (R²={best_model[1]['R2']:.3f}, "
+          f"RMSE={best_model[1]['RMSE']:.4f}, MAE={best_model[1]['MAE']:.4f})")
+    
+
+
+#%% 
+#KB TO EXPLORE
+alpha, gamma = 0.2, 0.9  # learning rate, discount factor
+q_values, reward_preds = [], []
+Q = {0:0, 1:0}  # left=0, right=1
+
+for _, row in df_trials.iterrows():
+    choice_raw = row['choice']
+    reward = row['feedbackType']
+    
+    # Map choices: -1 → 0 (left), +1 → 1 (right)
+    if choice_raw == -1:
+        choice = 0
+    elif choice_raw == 1:
+        choice = 1
+    else:
+        # If NaN or invalid choice, skip with default value
+        q_values.append(np.nan)
+        reward_preds.append(np.nan)
+        continue
+    
+    # Append current values
+    q_values.append(Q[choice])
+    reward_preds.append(Q[1] - Q[0])  # relative bias
+    
+    # Q-learning update
+    pe = reward - Q[choice]
+    Q[choice] += alpha * pe
+
+df_trials['q_value'] = q_values
+df_trials['q_bias'] = reward_preds
+plt.plot(df_trials.q_bias)
+plt.plot(df_trials.probabilityLeft)
+
+
+
+
+#%%
+
+# ==========================================================
+# 4. TRAINING LOOP FOR MULTIPLE TARGETS
+# ==========================================================
+
+from sklearn.neural_network import MLPRegressor
+
+models = {
+    "LinearRegression": LinearRegression(),
+    "LassoCV": LassoCV(cv=5, random_state=42),
+    "ElasticNetCV": ElasticNetCV(cv=5, random_state=42),
+    "SVR": SVR(kernel='rbf'),
+    "RandomForest": RandomForestRegressor(n_estimators=300, random_state=42),
+    "GradientBoosting": GradientBoostingRegressor(random_state=42),
+    "XGBoost": xgb.XGBRegressor(n_estimators=300, random_state=42),
+    "NeuralNet": MLPRegressor(
+        hidden_layer_sizes=(128, 64, 32),
+        activation='relu', solver='adam',
+        learning_rate_init=0.001,
+        max_iter=500, random_state=42
+    )
+}
+
+
+all_results = {}
+
+for target_name, y in targets.items():
+    print(f"\n==================== Target: {target_name} ====================")
+
+    mask = y.notna()
+    X_target, y_target = X[mask], y[mask]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_target, y_target, test_size=0.2, random_state=42
+    )
+
+    # Scale
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    results = {}
+
+    for name, model in models.items():
+        if name in ["LinearRegression", "LassoCV", "ElasticNetCV", "SVR"]:
+            model.fit(X_train_scaled, y_train)
+            y_pred = model.predict(X_test_scaled)
+        else:
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+
+        r2 = r2_score(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        mae = mean_absolute_error(y_test, y_pred)
+
+        results[name] = {"R2": r2, "RMSE": rmse, "MAE": mae}
+        print(f"=== {name} ===")
+        print(f"R²: {r2:.3f} | RMSE: {rmse:.4f} | MAE: {mae:.4f}\n")
+
+        # Feature importance (tree models only)
+        if hasattr(model, "feature_importances_"):
+            importances = pd.Series(model.feature_importances_, index=X.columns)
+            importances = importances.sort_values(ascending=False)
+            plt.figure(figsize=(8, 6))
+            sns.barplot(x=importances, y=importances.index, color="skyblue")
+            plt.title(f"Feature Importances ({name}) - {target_name}")
+            plt.tight_layout()
+            plt.show()
+
+            # SHAP for tree models
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_train)
+            shap.summary_plot(shap_values, X_train, feature_names=X.columns, show=False)
+            plt.title(f"SHAP Summary - {name} ({target_name})")
+            plt.show()
+
+            # PDP for top 3 features
+            top_features = importances.index[:3].tolist()
+            fig, ax = plt.subplots(figsize=(12, 6))
+            PartialDependenceDisplay.from_estimator(
+                model, X_train, top_features, feature_names=X.columns, ax=ax
+            )
+            plt.suptitle(f"PDP ({name}) - {target_name}", fontsize=14)
+            plt.show()
+
+    all_results[target_name] = results
+
+# Final results summary
+print("\n===== ALL RESULTS =====")
+for target, res in all_results.items():
+    print(f"\nTarget: {target}")
+    for model, metrics in res.items():
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
 
 #%%
 # First, a binary vector of correct trials
