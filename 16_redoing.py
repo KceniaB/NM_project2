@@ -682,7 +682,7 @@ plot_heatmap_psth_sorted_by_rt(df_nph.zdFF, column_sort='quiescenceTime')
 
 # %%
 """
-prediction for the vars that wuld better explain the drop in the 5-HT activity before the stimOnTrigger_times 
+prediction for the vars that would better explain the drop in the 5-HT activity before the stimOnTrigger_times 
 """
 # Define window before stim (e.g., -0.5s to 0s)
 pre_window = [-0.5, 0]  # in seconds
@@ -954,7 +954,9 @@ for name in ["RandomForest", "GradientBoosting"]:
 # %%
 # %%
 """
+21-August-2025 - EDITED, complete
 Prediction of zdFF drop before stimOnTrigger_times
+mean min slope
 """
 
 import numpy as np
@@ -1004,14 +1006,26 @@ df_trials['zdff_drop_pre_stim_mean'] = means
 df_trials['zdff_drop_pre_stim_min'] = mins
 df_trials['zdff_drop_pre_stim_slope'] = slopes
 
-# Binary correctness
-df_trials['correct'] = (df_trials['feedbackType'] == 1).astype(int)
 
 # ==========================================================
 # 2. FEATURE ENGINEERING
 # ==========================================================
 
-# Sequential features
+# ---- Current trial (A)
+df_trials['quiescencePeriod'] = df_trials['quiescencePeriod']
+df_trials['quiescenceTime']   = df_trials['quiescenceTime']
+df_trials['trialTime']        = df_trials['trialTime']
+
+# ---- Previous trial (B)
+for col in ['quiescenceTime', 'trialTime', 'feedbackType', 'choice',
+            'allContrasts', 'allSContrasts', 'reactionTime',
+            'probabilityLeft', 'responseTime',
+            'zdff_drop_pre_stim_mean', 'zdff_drop_pre_stim_min', 'zdff_drop_pre_stim_slope']:
+    df_trials[f'prev_{col}'] = df_trials[col].shift(1)
+
+# ---- Sequential (C)
+df_trials['correct'] = (df_trials['feedbackType'] == 1).astype(int)
+# Consecutive correct
 consec_correct, consec_incorrect = [], []
 count_c, count_i = 0, 0
 for fb in df_trials['feedbackType']:
@@ -1029,18 +1043,13 @@ for fb in df_trials['feedbackType']:
 df_trials['consecutive_correct'] = consec_correct
 df_trials['consecutive_incorrect'] = consec_incorrect
 
-# Previous trial features
-for col in ['quiescenceTime', 'trialTime', 'feedbackType', 'choice',
-            'allContrasts', 'allSContrasts', 'reactionTime',
-            'probabilityLeft', 'responseTime',
-            'zdff_drop_pre_stim_mean', 'zdff_drop_pre_stim_min', 'zdff_drop_pre_stim_slope']:
-    df_trials[f'prev_{col}'] = df_trials[col].shift(1)
-
-# Interaction features
+# ---- Interactions (D)
 df_trials['interaction_quiescence_correct'] = df_trials['quiescenceTime'] * df_trials['correct']
 df_trials['interaction_reaction_correct'] = df_trials['reactionTime'] * df_trials['correct']
 df_trials['interaction_prev_trialTime_quiescenceTime'] = df_trials['prev_trialTime'] * df_trials['quiescenceTime']
 df_trials['interaction_prev_feedbackType_quiescenceTime'] = df_trials['prev_feedbackType'] * df_trials['quiescenceTime']
+
+
 
 # ==========================================================
 # 3. SELECT FINAL FEATURE SET
@@ -1301,6 +1310,7 @@ print("\n===== ALL RESULTS =====")
 for target, res in all_results.items():
     print(f"\nTarget: {target}")
     for model, metrics in res.items():
+        print(f"{model}: R²={metrics['R2']:.3f}, RMSE={metrics['RMSE']:.4f}, MAE={metrics['MAE']:.4f}")
 
 
 
@@ -1369,9 +1379,6 @@ for target, res in all_results.items():
 
 
 
-
-
-        
 
 #%%
 # First, a binary vector of correct trials
