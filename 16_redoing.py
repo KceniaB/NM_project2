@@ -1090,7 +1090,13 @@ models = {
     "SVR": SVR(kernel='rbf'),
     "RandomForest": RandomForestRegressor(n_estimators=300, random_state=42),
     "GradientBoosting": GradientBoostingRegressor(random_state=42),
-    "XGBoost": xgb.XGBRegressor(n_estimators=300, random_state=42)
+    "XGBoost": xgb.XGBRegressor(n_estimators=300, random_state=42),
+    "NeuralNet": MLPRegressor(
+        hidden_layer_sizes=(128, 64, 32),
+        activation='relu', solver='adam',
+        learning_rate_init=0.001,
+        max_iter=500, random_state=42
+    )
 }
 
 all_results = {}
@@ -1178,6 +1184,49 @@ for target, res in all_results.items():
     print(f"{target}: {best_model[0]} (R²={best_model[1]['R2']:.3f}, "
           f"RMSE={best_model[1]['RMSE']:.4f}, MAE={best_model[1]['MAE']:.4f})")
     
+
+
+# %% 
+""" 
+Feature Importance - double-check! 
+"""
+
+feature_cols
+X = df_trials[feature_cols].select_dtypes(include=[np.number]).fillna(0)
+X = X.fillna(0)  # fill NaNs (first trial, etc.)
+y = df_trials['zdff_drop_pre_stim_mean']
+
+
+X = X[mask]
+y = y[mask]
+
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+model = LinearRegression()
+model.fit(X_scaled, y)
+
+import pandas as pd
+coeffs = pd.Series(model.coef_, index=X.columns)
+print(coeffs.sort_values(key=abs, ascending=False))
+
+
+import matplotlib.pyplot as plt
+
+# Sort by absolute value
+sorted_coeffs = coeffs.sort_values(key=abs, ascending=True)
+
+plt.figure(figsize=(10, 8))
+sorted_coeffs.plot(kind='barh', color=(sorted_coeffs > 0).map({True: 'seagreen', False: 'indianred'}))
+plt.xlabel("Standardized Coefficient")
+plt.title("Feature Importance in Predicting zdFF Drop Pre-Stim")
+plt.axvline(x=0, color='black', linestyle='--', linewidth=0.8)
+plt.tight_layout()
+plt.show()
+
 
 
 #%% 
