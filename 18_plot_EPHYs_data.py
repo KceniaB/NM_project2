@@ -366,3 +366,150 @@ for event in ['stimOnTrigger_times', 'feedback_times']:
 
 
 # %%
+"""
+ALL, BOTH FROM ABOVE
+""" 
+#======================
+# VTA PSTH by event, feedback, contrast
+#======================
+from iblatlas.atlas import AllenAtlas
+import numpy as np
+import matplotlib.pyplot as plt
+from one.api import ONE
+from matplotlib import cm
+from scipy.ndimage import gaussian_filter1d
+
+one = ONE()
+
+# ----------------------
+# PARAMETERS
+# ----------------------
+PRE_TIME, POST_TIME = 1, 2
+BIN_SIZE = 0.01
+EVENTS = ['stimOnTrigger_times', 'feedback_times']
+SMOOTHING_SIGMA = 2  # adjust smoothing
+
+ba = AllenAtlas(25)  # 25µm resolution
+
+# ----------------------
+# PSTH FUNCTION
+# ----------------------
+def compute_psth(spike_times, event_times, pre_time=1, post_time=2, bin_size=0.01):
+    bins = np.arange(-pre_time, post_time + bin_size, bin_size)
+    counts = np.zeros(len(bins)-1)
+    for et in event_times:
+        aligned = spike_times - et
+        hist, _ = np.histogram(aligned, bins=bins)
+        counts += hist
+    counts = counts / (len(event_times) * bin_size)
+    return counts, bins[:-1] + bin_size/2
+
+# ----------------------
+# SEARCH SESSIONS WITH VTA
+# ----------------------
+eids = one.search(task_protocol='ephys', atlas_acronym='VTA', project='brainwide')
+print(f"Found {len(eids)} sessions with VTA")
+
+# ----------------------
+# FUNCTION TO MERGE LEFT/RIGHT CONTRASTS
+# ----------------------
+def merge_contrasts(left, right):
+    merged = []
+    for l, r in zip(left, right):
+        if not np.isnan(l):
+            merged.append(float(l))
+        elif not np.isnan(r):
+            merged.append(float(r))
+        else:
+            merged.append(np.nan)
+    return np.array(merged)
+
+# ----------------------
+# PROCESS SESSIONS
+# ----------------------
+all_data = []
+
+for eid in eids:
+    try:
+        print(f"Processing session: {eid}")
+        spikes = one.load_object(eid, 'spikes')
+        clusters = one.load_object(eid, 'clusters')
+        channels = one.load_object(eid, 'channels')
+        trials = one.load_object(eid, 'trials')
+
+        # Map clusters to brain regions
+        if 'brainLocationIds_ccf_2017' not in channels.keys():
+            print(f"Skipping session {eid}: missing brainLocationIds_ccf_2017")
+            continue
+
+        cluster_channels = clusters['channels']
+        cluster_region_ids = channels['brainLocationIds_ccf_2017'][cluster_channels]
+        cluster_acronyms = np.array([ba.regions.id2acronym(rid) for rid in cluster_region_ids])
+        vta_clusters = np.where(cluster_acronyms == 'VTA')[0]
+        if len(vta_clusters) == 0:
+            continue
+
+        # Merge contrasts
+        contrast_values = merge_contrasts(trials['contrastLeft'], trials['contrastRight'])
+
+        # Separate correct/incorrect trials
+        feedback = np.array(trials['feedbackType'], dtype=float)
+        mask_correct = feedback == 1
+        mask_incorrect = feedback == -1
+
+        for event in EVENTS:
+            for fb_label, mask in zip(['Correct','Incorrect'], [mask_correct, mask_incorrect]):
+                unique_contrasts = np.unique(contrast_values[mask])
+                for c in unique_contrasts:
+                    trial_mask = mask & (contrast_values == c)
+                    if trial_mask.sum() == 0:
+                        continue
+
+                    session_counts = []
+                    for clu in vta_clusters:
+                        st = spikes.times[spikes.clusters == clu]
+                        counts, t = compute_psth(st, trials[event][trial_mask],
+                                                 pre_time=PRE_TIME, post_time=POST_TIME,
+                                                 bin_size=BIN_SIZE)
+                        if SMOOTHING_SIGMA>0:
+                            counts = gaussian_filter1d(counts, sigma=SMOOTHING_SIGMA)
+                        session_counts.append(counts)
+
+                    if len(session_counts) > 0:
+                        all_data.append({'event': event,
+                                         'feedback': fb_label,
+                                         'contrast': c,
+                                         'counts': np.vstack(session_counts).mean(axis=0),
+                                         't': t})
+
+    except Exception as e:
+        print(f"Skipping session {eid} due to error: {e}")
+        continue
+
+# ----------------------
+# PLOT ALL
+# ----------------------
+for event in EVENTS:
+    for fb_label in ['Correct','Incorrect']:
+        plt.figure(figsize=(8,4))
+        subset = [d for d in all_data if d['event']==event and d['feedback']==fb_label]
+        if len(subset)==0:
+            continue
+        contrasts = np.unique([d['contrast'] for d in subset])
+        colors = cm.Greys(np.linspace(0.3,1.0,len(contrasts)))  # gradient gray
+
+        for i, c in enumerate(contrasts):
+            c_data = [d['counts'] for d in subset if d['contrast']==c]
+            if len(c_data)==0:
+                continue
+            mean_counts = np.vstack(c_data).mean(axis=0)
+            t = subset[0]['t']
+            plt.plot(t, mean_counts, color=colors[i], label=f"Contrast {c:.1f}")
+
+        plt.axvline(0, color='red', linestyle='--', label='Event')
+        plt.xlabel('Time from event (s)')
+        plt.ylabel('Firing rate (Hz)')
+        plt.title(f'VTA PSTH - {event} - {fb_label}')
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
