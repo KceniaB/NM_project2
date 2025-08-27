@@ -63,7 +63,7 @@ sessions_list2["present_in_list"] = sessions_list2["eid"].isin(sessions_list["ei
 sessions_list2
 
 # Count how many 0s and 1s
-counts = sessions_list2["flag"].value_counts()
+counts = sessions_list2["present_in_list"].value_counts()
 print(counts)
 
 """
@@ -71,6 +71,13 @@ present_in_list
 0    1488
 1     837
 """
+#%%
+""" to check which photometry sessions do not appear in the behavior """
+# Select rows from sessions_list that are NOT in sessions_list2
+df_missing = sessions_list[~sessions_list["eid"].isin(sessions_list2["eid"])]
+
+print(df_missing.shape)
+print(df_missing.head())
 
 
 #%%
