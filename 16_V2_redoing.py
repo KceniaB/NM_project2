@@ -2,6 +2,7 @@
 """ 
 New preprocessing - all in this repo 
 """
+# %%
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt 
@@ -21,51 +22,33 @@ from one.api import ONE #always after the imports
 one = ONE() 
 
 
-
-#%%
-#===========================================================================
-#                            Pick data from table 
-#===========================================================================
-table_path = '/home/kceniabougrova/Documents/NM_project_fromIBLserver/NM_project2/KB_sessions_insertions_map - upload.csv'
+table_path = '/home/kceniabougrova/Downloads/NewSessions_Aug2025_New.csv' 
 sessions_list = pd.read_csv(table_path)
 
-eid, subject, date, region, nph_file_path, nph_bnc_path = select_one_session(sessions_list, row=697)
-
-# Replace the prefix in the paths if needed
-old_prefix = '/mnt/h0/kb/'
-new_prefix = '/media/kceniabougrova/Seagate Basic/IBL_server_PC_20250529/kb/'
-
-nph_file_path = nph_file_path.replace(old_prefix, new_prefix)
-nph_bnc_path = nph_bnc_path.replace(old_prefix, new_prefix)
-
-# Load the CSVs
-df_nph = pd.read_csv(nph_file_path)
-df_bnc = pd.read_csv(nph_bnc_path)
-
-# Load the behavior
-df_trials, subject, session_date = load_trials_updated(eid) 
-
-print(subject, date, region)
-
-
-
-
-#%%
-""" LOAD EACH ROW """
 def get_eid(mouse, date): 
     eids = one.search(subject=mouse, date=date) 
-    eid = eids[0]
+    if len(eids) == 0:
+        return None  # no session found
+    eid = str(eids[0])   # get the first one and make it a string
     ref = one.eid2ref(eid)
     print(eid)
     print(ref) 
     return eid
-subject = 'ZFM-03065'
-date = '2021-10-01'
-eid = get_eid(subject, date)
-region = 'Region1G'
-nph_file_path = '/mnt/h0/kb/data/external_drive/HCW_S2_23082021/TCW_S26_01Oct2021/PhotometryData_M3_M2_TCW_S26_01Oct2021.csv'
 
-nph_bnc_path = '/mnt/h0/kb/data/external_drive/HCW_S2_23082021/TCW_S26_01Oct2021/DI0_M3_M2_TCW_S26_01Oct2021.csv'
+
+def select_one_session(sessions_list, row=12):
+    subject = sessions_list.loc[row, "subject"]
+    date = sessions_list.loc[row, "date"]
+    region = sessions_list.loc[row, "region"]
+    nph_file_path = sessions_list.loc[row, "photometry_path_a"]
+    nph_bnc_path = sessions_list.loc[row, "digital_inputs_path"]
+    eid = get_eid(subject,date)
+    print(eid)
+    return eid, subject, date, region, nph_file_path, nph_bnc_path
+
+
+eid, subject, date, region, nph_file_path, nph_bnc_path = select_one_session(
+    sessions_list, row=195)
 
 
 old_prefix = '/mnt/h0/kb/'
@@ -82,12 +65,6 @@ df_bnc = pd.read_csv(nph_bnc_path)
 df_trials, subject, session_date = load_trials_updated(eid) 
 
 print(subject, date, region)
-
-
-
-#%% #########################################################################################################
-# """ GET PHOTOMETRY DATA """ 
-
 
 
 df_nph["mouse"] = subject
@@ -103,10 +80,7 @@ tph = df_bnc["Timestamp"].values
 
 
 
-
-
-#%%
-
+##############################################################################
 """
 CHANGE INPUT AUTOMATICALLY 
 """ 
@@ -124,6 +98,8 @@ CHANGE INPUT AUTOMATICALLY
 tbpod = df_trials['stimOnTrigger_times'].values #bpod TTL times
 
 best_cols, match_scores = find_matching_trials_column(df_trials, tph)
+
+
 
 
 """
@@ -170,7 +146,15 @@ selected_data = df_nph[
 ] 
 df_nph = selected_data.reset_index(drop=True) 
 
-#%%
+
+
+
+print("Len TTL: ", len(tph), "Len tbpod: ", len(tbpod), "Len trials: ", len(df_trials))
+
+
+
+
+
 #===========================================================================
 #      4. FUNCTIONS TO LOAD DATA AND ADD SOME VARIABLES (BEHAVIOR)
 #===========================================================================
@@ -201,24 +185,6 @@ df_fixed = df_ph_1.copy()
 
 # Flip flags from swap_idx onward
 df_fixed.loc[swap_idx:, colname] = df_fixed.loc[swap_idx:, colname].map({1: 2, 2: 1})
-
-df_ph_1 = df_fixed
-
-
-
-##FOR MULTIPLE SWAPSSS
-swap_idxs = [16154, 46441, 46442, 46443, 46444, 46445]  # indexes where swaps happen
-colname = "LedState" if "LedState" in df_ph_1.columns else "Flags"
-
-df_fixed = df_ph_1.copy()
-
-# Track whether we should flip or not
-flip = False
-for i in range(len(df_fixed)):
-    if i in swap_idxs:
-        flip = not flip  # toggle flipping whenever we hit a swap index
-    if flip:
-        df_fixed.loc[i, colname] = {1: 2, 2: 1}[df_fixed.loc[i, colname]]
 
 df_ph_1 = df_fixed
 
@@ -304,11 +270,7 @@ plt.show()
 
 
 
-
-
-
-
-#%%
+##############################################################################################################################
 
 
 raw_reference = df_nph['raw_isosbestic'][0:]
@@ -325,7 +287,6 @@ ax2 = fig.add_subplot(212)
 ax2.plot(smooth_reference,'purple',linewidth=0.5)
 
 
-#%%
 
 lambd = 5e4 # Adjust lambda to get the best fit
 porder = 1
@@ -343,7 +304,7 @@ ax2.plot(r_base,'black',linewidth=1.5)
 
 
 
-#%%
+
 
 remove=0
 reference = (smooth_reference[remove:] - r_base[remove:])
@@ -359,7 +320,7 @@ ax2.plot(reference,'purple',linewidth=1.5)
 
 
 
-#%%
+
 
 z_reference = (reference - np.median(reference)) / np.std(reference)
 z_signal = (signal - np.median(signal)) / np.std(signal)
@@ -372,7 +333,6 @@ ax2.plot(z_reference,'purple',linewidth=1.5)
 
 
 
-#%%
 from sklearn.linear_model import Lasso
 lin = Lasso(alpha=0.0001,precompute=True,max_iter=1000,
             positive=True, random_state=9999, selection='random')
@@ -388,7 +348,7 @@ ax1.plot(z_reference,z_reference_fitted, 'r--',linewidth=1.5)
 
 
 
-#%%
+
 fig = plt.figure(figsize=(16, 8))
 ax1 = fig.add_subplot(111)
 ax1.plot(z_signal,'blue')
@@ -397,16 +357,16 @@ ax1.plot(z_reference_fitted,'purple')
 
 
 
-#%%
+
 zdFF = (z_signal - z_reference_fitted)
 
 
-#%%
+
 fig = plt.figure(figsize=(16, 8))
 ax1 = fig.add_subplot(111)
 ax1.plot(zdFF,'black')
 
-#%%
+
 df_nph['zdFF'] = zdFF
 nph = df_nph
 
@@ -456,29 +416,9 @@ plt.plot(time_axis, photometry_feedback, color='black', linewidth=0.3, alpha=0.3
 plt.axvline(x=0, color='red', linestyle='--')  # Event at 0s
 plt.xlabel("Time (s)")
 
-#%%
-plt.figure(figsize=(15, 8))
-
-# Mask for correct vs incorrect/other
-mask_correct = df_trials.feedbackType.values == 1
-mask_incorrect = ~mask_correct
-
-# Plot trials separately
-plt.plot(time_axis, photometry_feedback[:, mask_correct], color='blue', linewidth=0.75, alpha=0.3)
-plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='red', linewidth=0.75, alpha=0.3)
-
-# Event marker
-plt.axvline(x=0, color='black', linestyle='--')
-
-plt.xlabel("Time (s)")
-plt.ylabel("ΔF/F (z-scored)")
-plt.title("Peri-feedback PSTH split by feedback type")
-plt.show()
 
 
 
-
-# %% 
 
 
 """ SELECT THE EVENT AND WHAT INTERVAL TO PLOT IN THE PSTH """ 
@@ -507,8 +447,29 @@ event_idx = np.searchsorted(array_timestamps, event_times) #check idx where they
 
 psth_idx += event_idx
 
+plt.figure(figsize=(15, 8))
 
-#%%
+# Mask for correct vs incorrect/other
+mask_correct = df_trials.feedbackType.values == 1
+mask_incorrect = ~mask_correct
+
+# Plot trials separately
+plt.plot(time_axis, photometry_feedback[:, mask_correct], color='blue', linewidth=0.3, alpha=0.3)
+plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='red', linewidth=0.3, alpha=0.3)
+
+# Event marker
+plt.axvline(x=0, color='black', linestyle='--')
+
+plt.xlabel("Time (s)")
+plt.ylabel("ΔF/F (z-scored)")
+plt.title("Peri-feedback PSTH split by feedback type")
+plt.show()
+
+
+
+
+
+
 
 def plot_heatmap_psth(preprocessingtype=df_nph.zdFF): 
     psth_good = preprocessingtype.values[psth_idx[:,(df_trials.feedbackType == 1)]]
@@ -558,6 +519,103 @@ def plot_heatmap_psth(preprocessingtype=df_nph.zdFF):
     plt.show() 
 
 plot_heatmap_psth(df_nph.zdFF)
+
+
+print(subject, date, region)
+print(eid)
+print("Len TTL: ", len(tph), "Len tbpod: ", len(tbpod), "Len trials: ", len(df_trials))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

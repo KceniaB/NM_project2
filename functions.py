@@ -7,6 +7,7 @@ Functions to use within this repo
 """
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 from one.api import ONE #always after the imports 
 # one = ONE(cache_dir="/mnt/h0/kb/data/one") 
@@ -28,7 +29,8 @@ def select_one_session(sessions_list, row=150):
     nph_bnc_path = sessions_list.loc[row, "digital_inputs_path"]
     return eid, subject, date, region, nph_file_path, nph_bnc_path
 
-def find_matching_trials_column(df_trials, tph, verbose=True, max_ratio_diff=0.1):
+def find_matching_trials_column(df_trials, tph, verbose=True, max_ratio_diff=0.1, plot=True):
+# def find_matching_trials_column(df_trials, tph, verbose=True, max_ratio_diff=0.1):
     """
     Finds one or more df_trials columns whose time series (ending in '_times') 
     best match the timestamps in `tph` in terms of length and time difference patterns.
@@ -71,7 +73,30 @@ def find_matching_trials_column(df_trials, tph, verbose=True, max_ratio_diff=0.1
         elif len(best_cols) == 1:
             print(f"✅ Best match: {best_cols[0]}")
         else:
-            print(f"✅ Multiple likely matches: {best_cols}")
+            print(f"✅ Multiple likely matches: {best_cols}") 
+
+    # Quick visualization
+    if plot and match_scores:
+        fig, ax1 = plt.subplots(figsize=(8, 4))
+        cols_plot = list(match_scores.keys())
+        scores_plot = [match_scores[c] for c in cols_plot]
+        ratios_plot = [len_ratios[c] for c in cols_plot]
+
+        # correlation barplot
+        ax1.bar(cols_plot, scores_plot, color='skyblue', alpha=0.7)
+        ax1.axhline(0.9, color='green', ls='--', lw=1)
+        ax1.set_ylabel("Correlation (intervals)")
+        ax1.set_xticklabels(cols_plot, rotation=45, ha='right')
+
+        # length ratio on secondary axis
+        ax2 = ax1.twinx()
+        ax2.plot(cols_plot, ratios_plot, color='orange', marker='o', linestyle='-')
+        ax2.axhline(1, color='red', ls=':', lw=1)
+        ax2.set_ylabel("Length ratio (tph / column)")
+
+        plt.tight_layout()
+        plt.show()
+
 
     return best_cols, match_scores
 
@@ -357,7 +382,18 @@ def find_FR(x):
         print("CHECK FR!!!!!!!!!!!!!!!!!!!!") 
     return acq_FR 
 
-
+def find_split_FR(x): 
+    """
+    find the frame rate of acquisition
+    x = df_470["Timestamp"]
+    """
+    acq_FR2 = round(1/np.mean(x.diff()))
+    # check to make sure that it is 15/30/60! (- with a loop)
+    if acq_FR2 == 15 or acq_FR2 == 30 or acq_FR2 == 60: 
+        print("All good, the FR is: ", acq_FR2)
+    else: 
+        print("CHECK FR!!!!!!!!!!!!!!!!!!!!") 
+    return acq_FR2 
 
 
 
