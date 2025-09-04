@@ -66,9 +66,70 @@ df_trials, subject, session_date = load_trials_updated(eid)
 
 """
 #LOAD BEHAVIOR FROM EPHYS
-#raw data 
-from ibllib.io import raw_data_loaders
+#raw data, only if not in 
+from ibllib.io import raw_data_loaders 
+session_path = one.eid2path(eid)
 data = raw_data_loaders.load_data(session_path)
+
+def trials_to_df(trials, subject=None, date=None, eid=None):
+    
+    #Convert raw IBL taskData trials (list of dicts) into a tidy DataFrame
+    #with one row per trial.
+    rows = []
+    for i, t in enumerate(trials):
+        row = {
+            # quiescence
+            "quiescencePeriod": t.get("quiescent_period"),
+            "quiescenceTime": t.get("quiescent_period_buffer"),  # if present
+            # contrasts
+            "allContrasts": t.get("contrast"),
+            "allSContrasts": t.get("signed_contrast"),
+            "contrastLeft": t.get("contrastLeft"),
+            "contrastRight": t.get("contrastRight"),
+            # stim and go cue
+            "stimOnTrigger_times": t.get("stim_on_time"),
+            "stimOffTrigger_times": t.get("stim_off_time"),
+            "stimFreezeTrigger_times": t.get("stim_freeze_time"),
+            "stimOn_times": t.get("stimOn_times"),
+            "stimOff_times": t.get("stimOff_times"),
+            "goCueTrigger_times": t.get("goCueTrigger_times"),
+            "goCue_times": t.get("goCue_times"),
+            # responses
+            "response_times": t.get("response_time"),
+            "firstMovement_times": t.get("firstMovement_times"),
+            "choice": t.get("choice"),
+            # feedback / reward
+            "feedback_times": t.get("feedback_time"),
+            "feedbackType": t.get("feedbackType"),
+            "rewardVolume": t.get("reward_amount"),
+            # probability
+            "probabilityLeft": t.get("stim_probability_left"),
+            # intervals
+            "intervals_0": t.get("intervals_0"),
+            "intervals_1": t.get("intervals_1"),
+            # session/trial info
+            "subject": subject,
+            "date": date,
+            "eid": eid,
+            "trialNumber": t.get("trial_num", i+1),
+        }
+        # Derived metrics
+        if row["goCue_times"] is not None and row["response_times"] is not None:
+            row["reactionTime"] = row["response_times"] - row["goCue_times"]
+            row["responseTime"] = row["response_times"] - row["stimOnTrigger_times"] if row["stimOnTrigger_times"] else None
+        if row["stimOnTrigger_times"] is not None and row["stimOffTrigger_times"] is not None:
+            row["trialTime"] = row["stimOffTrigger_times"] - row["stimOnTrigger_times"]
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+df_trials = trials_to_df(trials = data,
+                        subject=data[0]["data_file_path"][24:33],
+                        date=data[0]["data_file_path"][34:44],
+                        eid=eid)
+
+print(df_trials.head())
 """
 
 print(subject, date, region)
