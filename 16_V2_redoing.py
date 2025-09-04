@@ -64,6 +64,13 @@ df_bnc = pd.read_csv(nph_bnc_path)
 # Load the behavior
 df_trials, subject, session_date = load_trials_updated(eid) 
 
+"""
+#LOAD BEHAVIOR FROM EPHYS
+#raw data 
+from ibllib.io import raw_data_loaders
+data = raw_data_loaders.load_data(session_path)
+"""
+
 print(subject, date, region)
 
 
