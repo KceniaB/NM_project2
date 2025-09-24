@@ -1,29 +1,27 @@
 #%% 
 """ 
-KB 2025-08-05 
-VERSION2 - if you have the file: {MOUSE NAME}_{DATE}/photometry_signal.pqt
-Code to pick the new [2025] photometry and behavior files and preprocess them
-output: preprocessed aligned signal; heatmap; psth 
-
-TO CHANGE: lines 378-382 the file path to those files 
+KB 2025-09-23 
+VERSION3 
 """
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt 
 import seaborn as sns 
-# from brainbox.behavior.training import compute_performance 
-# from brainbox.io.one import SessionLoader 
-# import iblphotometry.kcenia as kcenia
-# import ibldsp.utils
-# import scipy.signal
-# from iblutil.numerical import rcoeff
-# import sys
-# sys.path.insert(0, "/home/kceniabougrova/Documents/GitHub/ibl-photometry/src")
 
 from one.api import ONE #always after the imports
 one = ONE() 
 
+"""
+CHANGE HERE THE EVENT AND THE EID
+FOR THE SAME EID YOU CAN CHANGE THE EVENT LATER IN THIS CODE 
+"""
+
+eid = '1be2e1e9-e4f2-41ad-9e34-ae27967d41ac'
+EVENT = "feedback_times"  # "stimOnTrigger_times" etc
+
+
+#%%
 
 """ FUNCTIONS """
 
@@ -375,234 +373,155 @@ search for those 3 files:
     - _neurophotometrics_fpData_raw.pqt
     - photometryROI_locations.pqt - or just know the region G from which you're recording from 
     - photometry_signal.pqt
-"""
-# table_path = '/home/kceniabougrova/Downloads/photometry_ZFM-09139_2025-08-05/_neurophotometrics_fpData_raw.pqt' 
-# photometry_raw_table = pd.read_parquet(table_path)
-table_path = '/home/kceniabougrova/Downloads/photometry_ZFM-09139_2025-08-05/photometryROI_locations.pqt' 
-region_map = pd.read_parquet(table_path)
-table_path = '/home/kceniabougrova/Downloads/photometry_ZFM-09139_2025-08-05/photometry_signal.pqt' 
-photometry_table = pd.read_parquet(table_path)
+# """
+# # table_path = '/home/kceniabougrova/Downloads/photometry_ZFM-09139_2025-08-05/_neurophotometrics_fpData_raw.pqt' 
+# # photometry_raw_table = pd.read_parquet(table_path)
+# table_path = '/home/kceniabougrova/Downloads/photometry_ZFM-09139_2025-08-05/photometryROI_locations.pqt' 
+# region_map = pd.read_parquet(table_path)
+# table_path = '/home/kceniabougrova/Downloads/photometry_ZFM-09139_2025-08-05/photometry_signal.pqt' 
+# photometry_table = pd.read_parquet(table_path)
 
-eid = '37215b1d-8baa-48ca-a629-bb38b6c404bc'
+# eid = '37215b1d-8baa-48ca-a629-bb38b6c404bc'
 #another example 
 # eid = '1be2e1e9-e4f2-41ad-9e34-ae27967d41ac'
-region = photometry_table.columns[0]
+# region = photometry_table.columns[0]
 # Load the behavior
 df_trials, subject, session_date = load_trials_updated(eid) 
 
-print(subject, session_date, region)
+# print(subject, session_date, region)
 
 
-
-#%% #########################################################################################################
-# """ EDIT PHOTOMETRY DATA """ 
-
-
-photometry_table["mouse"] = subject
-photometry_table["date"] = session_date
-photometry_table["region"] = region
-photometry_table["eid"] = eid 
-
-df_nph = photometry_table
+import pandas as pd
+from pathlib import Path
+from iblphotometry import io
+# from brainbox.io.one import SessionLoader
 
 
-#%%
-""" edit the start and end time of the photometry file, to make it smaller and closer to the behavior task time """
-session_start = df_trials.intervals_0.values[0] - 10  # Start time, 100 seconds before the first tph value
-session_end = df_trials.intervals_1.values[-1] + 10   # End time, 100 seconds after the last tph value
+class PhotometryLoader:
+    # TODO make this class a subclass of SessionLoader
+    # TODO move this class to brainbox.io
 
-# Select data within the specified time range
-selected_data = df_nph[
-    (df_nph['times'] >= session_start) &
-    (df_nph['times'] <= session_end)
-] 
-df_nph = selected_data.reset_index(drop=True) 
+    def __init__(self, one, verbose=False):
+        self.one = one
+        self.verbose = verbose
 
-#%%
-#===========================================================================
-#      4. FUNCTIONS TO LOAD DATA AND ADD SOME VARIABLES (BEHAVIOR)
-#===========================================================================
-""" 4.1.2.1 Length """
-# Verify the length of the data of the 2 different LEDs
-df_470, df_415 = verify_length(df_nph)
-df_ph_1 = df_nph
+    def load_photometry_data(self, eid=None, pid=None, rename=True) -> pd.DataFrame:
+        if pid is not None:
+            raise NotImplementedError
+            # return self._load_data_from_pid(pid)
 
-# Filter data for LedState 2 (470nm)
-df_470 = df_470.reset_index(drop=True)
+        if eid is not None:
+            return self._load_data_from_eid(eid, rename=rename)
 
-# Filter data for LedState 1 (415nm)
-df_415 = df_415.reset_index(drop=True)
+    def _load_data_from_eid(self, eid, rename=True) -> pd.DataFrame:
+        raw_photometry_df = self.one.load_dataset(eid, 'photometry.signal.pqt')
+        locations_df = self.one.load_dataset(eid, 'photometryROI.locations.pqt')
+        read_config = dict(
+            data_columns=list(locations_df.index),
+            rename=locations_df['brain_region'].to_dict() if rename else None,
+        )
+        raw_dfs = io.from_ibl_dataframe(raw_photometry_df, **read_config)
 
-# If one array has exactly one more row, remove the last row
-if abs(len(df_470) - len(df_415)) == 1:
-    if len(df_470) > len(df_415):
-        df_470 = df_470.iloc[:-1]
-    else:
-        df_415 = df_415.iloc[:-1]
+        signal_band_names = list(raw_dfs.keys())
+        col_names = list(raw_dfs[signal_band_names[0]].columns)
+        if self.verbose:
+            print(f'available signal bands: {signal_band_names}')
+            print(f'available brain regions: {col_names}')
 
-# Final safety check
-assert len(df_470) == len(df_415), "Sync arrays are of different lengths even after correction"
-
-# Plot the data
-plt.rcParams["figure.figsize"] = (8, 5)
-plt.plot(df_470[region], c='#279F95', linewidth=0.5)
-plt.plot(df_415[region], c='#803896', linewidth=0.5)
-plt.title("Cropped signal "+subject+' '+str(session_date))
-plt.legend(["GCaMP", "isosbestic"], frameon=False)
-sns.despine(left=False, bottom=False)
-plt.show(block=False)
-plt.close() 
+        return raw_dfs
 
 
-# Print counts
-print("470 =", df_470['wavelength'].count(), " 415 =", df_415['wavelength'].count())
+class KceniaLoader(PhotometryLoader):
+    # soon do be OBSOLETE
+    def _load_data_from_eid(self, eid: str, rename=True):
+        session_path = self.one.eid2path(eid)
+        pnames = self._eid2pnames(eid)
 
+        _raw_dfs = {}
+        for pname in pnames:
+            pqt_path = session_path / 'alf' / pname / 'raw_photometry.pqt'
+            _raw_dfs[pname] = pd.read_parquet(pqt_path).set_index('times')
 
-#================================================
-""" 4.1.4 FRAME RATE """ 
-time_diffs = (df_470["times"]).diff().dropna() 
-fs = 1 / time_diffs.median() 
+        signal_bands = ['raw_calcium', 'raw_isosbestic']  # HARDCODED but fine
 
-raw_reference = df_415[region] #isosbestic 
-raw_signal = df_470[region] #GCaMP signal 
-raw_timestamps_nph_470 = df_470["times"]
-raw_timestamps_nph_415 = df_415["times"]
+        # flipping the data representation
+        raw_dfs = {}
+        for band in signal_bands:
+            df = pd.DataFrame([_raw_dfs[pname][band].values for pname in pnames]).T
+            df.columns = pnames
+            df.index = _raw_dfs[pname][band].index
+            raw_dfs[band] = df
 
-# my_array = np.c_[raw_timestamps_bpod, raw_reference, raw_signal]
-my_array = np.column_stack((raw_timestamps_nph_470, raw_reference, raw_signal))
+        if self.verbose:
+            print(f'available signal bands: {list(raw_dfs.keys())}')
+            cols = list(raw_dfs[list(raw_dfs.keys())[0]].columns)
+            print(f'available brain regions: {cols}')
 
-df_nph = pd.DataFrame(my_array, columns=['times', 'raw_isosbestic', 'raw_calcium']) #IMPORTANT DF
+        return raw_dfs
 
-
-plt.figure(figsize=(20, 6))
-
-# Plot calcium and isosbestic signals
-plt.plot(df_nph['times'][200:1000], df_nph['raw_calcium'][200:1000], linewidth=1.25, alpha=0.8, color='teal') 
-plt.plot(df_nph['times'][200:1000], df_nph['raw_isosbestic'][200:1000], linewidth=1.25, alpha=0.8, color='purple') 
-
-# Vertical lines at stimulus onset
-for t in df_trials['stimOnTrigger_times'].dropna():
-    if df_nph['times'].iloc[200] <= t <= df_nph['times'].iloc[999]:
-        plt.axvline(t, color='gray', linestyle='--', alpha=0.4, linewidth=1)
-
-# Vertical lines at feedback times, color-coded by feedbackType
-for t, fb_type in zip(df_trials['feedback_times'], df_trials['feedbackType']):
-    if pd.notna(t) and df_nph['times'].iloc[200] <= t <= df_nph['times'].iloc[999]:
-        color = 'blue' if fb_type == 1 else 'red' if fb_type == -1 else 'gray'
-        plt.axvline(t, color=color, linestyle='-', alpha=0.6, linewidth=1.5)
-
-plt.tight_layout()
-plt.show()
+    def _eid2pnames(self, eid: str):
+        session_path = self.one.eid2path(eid)
+        pnames = [reg.name for reg in session_path.joinpath('alf').glob('Region*')]
+        return pnames
 
 
 
 
 
+# Your eid
+# eid = '1be2e1e9-e4f2-41ad-9e34-ae27967d41ac'
 
+# --- Load behavior
+df_trials, subject, session_date = load_trials_updated(eid)
 
+print("Behavior table:")
+print(df_trials.head())
 
+# --- Load photometry
+loader = PhotometryLoader(one, verbose=True)
+raw_dfs = loader.load_photometry_data(eid=eid, rename=True)
 
+# raw_dfs is a dict: e.g. {'raw_calcium': df1, 'raw_isosbestic': df2, ...}
+print("Photometry bands available:", raw_dfs.keys())
 
-#%%
-""" PREPROCESSING THE PHOTOMETRY SIGNAL """
+# Example: pick calcium band
+df_phot = raw_dfs['GCaMP']
+print("Photometry table (GCaMP):")
+print(df_phot.head())
 
-raw_reference = df_nph['raw_isosbestic'][0:]
-raw_signal = df_nph['raw_calcium'][0:]
+# --- Optional: align time ranges
+tmin, tmax = df_trials["intervals_0"].min(), df_trials["intervals_1"].max()
+df_phot = df_phot.loc[(df_phot.index >= tmin) & (df_phot.index <= tmax)]
 
+print(f"\nExtracted for {subject} on {session_date}:")
+print(f"- {len(df_trials)} trials")
+print(f"- {df_phot.shape[0]} photometry samples in range")
+
+df_phot = df_phot.reset_index()
+
+df_nph = df_phot
+nph = df_nph
+nph['zdFF'] = nph.LC
+
+raw_signal = nph['zdFF'][0:]
 smooth_win = 10
-smooth_reference = smooth_signal(raw_reference, smooth_win)
 smooth_signal = smooth_signal(raw_signal, smooth_win) 
 
-fig = plt.figure(figsize=(16, 10))
-ax1 = fig.add_subplot(211)
-ax1.plot(smooth_signal,'blue',linewidth=1.5)
-ax2 = fig.add_subplot(212)
-ax2.plot(smooth_reference,'purple',linewidth=1.5)
-
-
-#%% 
 lambd = 5e4 # Adjust lambda to get the best fit
 porder = 1
 itermax = 50
-r_base=airPLS(smooth_reference.T,lambda_=lambd,porder=porder,itermax=itermax)
 s_base=airPLS(smooth_signal,lambda_=lambd,porder=porder,itermax=itermax)
 
-fig = plt.figure(figsize=(16, 10))
-ax1 = fig.add_subplot(211)
-ax1.plot(smooth_signal,'blue',linewidth=1.5)
-ax1.plot(s_base,'black',linewidth=1.5)
-ax2 = fig.add_subplot(212)
-ax2.plot(smooth_reference,'purple',linewidth=1.5)
-ax2.plot(r_base,'black',linewidth=1.5)
-
-
-
-#%%
-
 remove=0
-reference = (smooth_reference[remove:] - r_base[remove:])
 signal = (smooth_signal[remove:] - s_base[remove:])  
 
-fig = plt.figure(figsize=(16, 10))
-ax1 = fig.add_subplot(211)
-ax1.plot(signal,'blue',linewidth=1.5)
-ax2 = fig.add_subplot(212)
-ax2.plot(reference,'purple',linewidth=1.5)
-
-
-
-
-
-#%%
-
-z_reference = (reference - np.median(reference)) / np.std(reference)
 z_signal = (signal - np.median(signal)) / np.std(signal)
 
-fig = plt.figure(figsize=(16, 10))
-ax1 = fig.add_subplot(211)
-ax1.plot(z_signal,'blue',linewidth=1.5)
-ax2 = fig.add_subplot(212)
-ax2.plot(z_reference,'purple',linewidth=1.5)
 
 
+df_nph['zdFF'] = z_signal
 
-#%%
-from sklearn.linear_model import Lasso
-lin = Lasso(alpha=0.0001,precompute=True,max_iter=1000,
-            positive=True, random_state=9999, selection='random')
-n = len(z_reference)
-lin.fit(z_reference.reshape(n,1), z_signal.reshape(n,1))
-
-z_reference_fitted = lin.predict(z_reference.reshape(n,1)).reshape(n,)
-
-fig = plt.figure(figsize=(16, 8))
-ax1 = fig.add_subplot(111)
-ax1.plot(z_reference,z_signal,'b.')
-ax1.plot(z_reference,z_reference_fitted, 'r--',linewidth=1.5)
-
-
-
-#%%
-fig = plt.figure(figsize=(16, 8))
-ax1 = fig.add_subplot(111)
-ax1.plot(z_signal,'blue')
-ax1.plot(z_reference_fitted,'purple')
-
-
-
-
-#%%
-zdFF = (z_signal - z_reference_fitted)
-
-
-#%%
-fig = plt.figure(figsize=(16, 8))
-ax1 = fig.add_subplot(111)
-ax1.plot(zdFF,'black')
-
-#%%
-df_nph['zdFF'] = zdFF
-nph = df_nph
+nph = df_nph 
 
 fs = 1 / np.median(np.diff(nph.times.values))
 fs
@@ -620,110 +539,299 @@ behav = df_trials
 photometry_feedback, idx_psth = psth(
     calcium=nph.zdFF.values,
     times=nph.times.values,
-    t_events=behav["intervals_0"].values,
+    t_events=behav[EVENT].values,
     fs=fs,
     peri_event_window=[-1, 2]
 )
 
-plt.figure(figsize=(15, 8))
-plt.plot(photometry_feedback, color='black', linewidth=0.3, alpha=0.3)
-plt.axvline(x=photometry_feedback.shape[0] // 3, color='red', linestyle='--')  # Event at t=0
-plt.xlabel("Timepoints")
-plt.ylabel("ΔF/F (z-scored)")
-plt.title("Peri-feedback PSTH")
-plt.show()
+
 
 
 PERIEVENT_WINDOW = [-1, 2]
 
 time_axis = np.arange(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], 1/fs)
 
-plt.figure(figsize=(15, 8))
+plt.figure(figsize=(10, 8))
 plt.plot(time_axis, photometry_feedback, color='black', linewidth=0.3, alpha=0.3)
 plt.axvline(x=0, color='red', linestyle='--')  # Event at 0s
 plt.xlabel("Time (s)")
+plt.ylabel("ΔF/F (z-scored)")
+plt.title("Peri-feedback PSTH")
+plt.show()
 
 
 
 
-# %% 
-""" TO PLOT PSTH """
 
-""" SELECT THE EVENT AND WHAT INTERVAL TO PLOT IN THE PSTH """ 
-EVENT = "feedback_times" 
-time_bef = -1
-time_aft = 2
-PERIEVENT_WINDOW = [time_bef,time_aft]
-SAMPLING_RATE = int(1/np.mean(np.diff(df_nph.times))) 
+# %%
+"""
+MORE PLOTS 
+"""
+n_timepoints, n_trials = photometry_feedback.shape
+time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints, endpoint=False)
 
-array_timestamps = np.array(df_nph.times) #pick the nph timestamps transformed to bpod clock 
-event_test = np.array(df_trials.intervals_0) #pick the intervals_0 timestamps 
-idx_event = np.searchsorted(array_timestamps, event_test) #check idx where they would be included, in a sorted way 
-""" create a column with the trial number in the nph df """
-df_nph["trial_number"] = 0 #create a new column for the trial_number 
-df_nph.loc[idx_event,"trial_number"]=1
-df_nph["trial_number"] = df_nph.trial_number.cumsum() #sum the [i-1] to i in order to get the trial number 
+# ---------- Mean ± SEM across all trials ----------
+mean_trace = np.nanmean(photometry_feedback, axis=1)              # mean across trials
+sem_trace  = np.nanstd(photometry_feedback, axis=1) / np.sqrt(n_trials)
 
-sample_window = np.arange(PERIEVENT_WINDOW[0] * SAMPLING_RATE, PERIEVENT_WINDOW[1] * SAMPLING_RATE + 1)
-n_trials = df_trials.shape[0]
+plt.figure(figsize=(8, 6))
+plt.plot(time_axis, mean_trace, lw=2, label="Mean")
+plt.fill_between(time_axis, mean_trace - sem_trace, mean_trace + sem_trace, alpha=0.3, label="SEM")
+plt.axvline(0, ls='--')
+plt.xlabel("Time (s)")
+plt.ylabel("ΔF/F (z-scored)")
+plt.title("Peri-event PSTH (mean ± SEM)")
+plt.legend()
+plt.tight_layout()
+plt.show()
 
-psth_idx = np.tile(sample_window[:,np.newaxis], (1, n_trials)) 
+# ---------- Trial-by-trial heatmap ----------
+# Optional: sort trials by a behavior column (e.g., feedbackType) to make structure clearer
+# Remove/disable the next 2 lines if you don't want sorting:
+trial_order = np.argsort(behav["feedbackType"].fillna(-999).to_numpy())
+psth_for_heat = photometry_feedback[:, trial_order].T  # rows=trials, cols=time
 
-event_times = np.array(df_trials[EVENT]) #pick the feedback timestamps 
+fig, ax = plt.subplots(figsize=(10, 6))
+im = sns.heatmap(
+    psth_for_heat,
+    cmap="rocket",  # or "rocket" if you prefer warmer palette
+    center=0,        # zero-centered color map is helpful for z-scored data
+    cbar_kws={"label": "ΔF/F (z)"}
+)
 
-event_idx = np.searchsorted(array_timestamps, event_times) #check idx where they would be included, in a sorted way 
+# Put time ticks in seconds along x-axis
+tick_secs = np.arange(np.ceil(PERIEVENT_WINDOW[0]), np.floor(PERIEVENT_WINDOW[1]) + 1, 1.0)
+tick_idx  = np.searchsorted(time_axis, tick_secs)
+ax.set_xticks(tick_idx)
+ax.set_xticklabels([f"{s:.0f}" for s in tick_secs])
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("Trials")
 
-psth_idx += event_idx
+# Vertical line at event time (0 s)
+zero_idx = np.searchsorted(time_axis, 0)
+ax.axvline(zero_idx, color="w", lw=1)
 
+ax.set_title("Peri-event photometry (trial heatmap)")
+plt.tight_layout()
+plt.show()
+
+# %%
+""" 
+PSTH single trials and mean 
+"""
+# photometry_feedback: shape [timepoints, n_trials]
+n_time, n_trials = photometry_feedback.shape
+time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_time, endpoint=False)
+
+# valid trials = columns that aren't all-NaN (out-of-bounds get left as NaN)
+valid_cols = ~np.all(np.isnan(photometry_feedback), axis=0)
+pf_valid = photometry_feedback[:, valid_cols]
+n_valid = pf_valid.shape[1]
+
+fig, ax = plt.subplots(figsize=(10, 8))
+# single-trial traces
+ax.plot(time_axis, photometry_feedback, linewidth=0.3, alpha=0.3, color='gray')
+
+# mean ± SEM
+mean_trace = np.nanmean(pf_valid, axis=1)
+sem_trace  = np.nanstd(pf_valid, axis=1) / np.sqrt(n_valid)
+
+ax.plot(time_axis, mean_trace, linewidth=3.5, label="Mean")
+ax.fill_between(time_axis, mean_trace - sem_trace, mean_trace + sem_trace, alpha=0.25, label="SEM")
+
+ax.axvline(0, linestyle='--')
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("ΔF/F (z)")
+ax.set_title("Peri-event PSTH (single trials + mean ± SEM)")
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# %%
+""" divide correct and incorrect """
+ft = behav["feedbackType"].to_numpy()
+
+groups = {
+    "Correct (1)":   (ft == 1),
+    "Incorrect (-1)": (ft == -1),
+}
+
+fig, ax = plt.subplots(figsize=(10, 8))
+for label, mask in groups.items():
+    if mask.sum() == 0:
+        continue
+    # select columns (trials) by mask
+    traces = photometry_feedback[:, mask]
+    # drop columns that are all-NaN
+    keep = ~np.all(np.isnan(traces), axis=0)
+    traces = traces[:, keep]
+    if traces.size == 0:
+        continue
+    m  = np.nanmean(traces, axis=1)
+    se = np.nanstd(traces, axis=1) / np.sqrt(traces.shape[1])
+    ax.plot(time_axis, m, linewidth=2, label=f"{label} (n={traces.shape[1]})")
+    ax.fill_between(time_axis, m - se, m + se, alpha=0.25)
+
+ax.axvline(0, linestyle='--')
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("ΔF/F (z)")
+ax.set_title("Peri-event PSTH by feedbackType (mean ± SEM)")
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# %%
+ft = behav["feedbackType"].to_numpy()
+
+groups = {
+    "Correct (1)":   (ft == 1),
+    "Incorrect (-1)": (ft == -1),
+}
+
+fig, ax = plt.subplots(figsize=(10, 8))
+for label, mask in groups.items():
+    if mask.sum() == 0:
+        continue
+    # select columns (trials) by mask
+    traces = photometry_feedback[:, mask]
+    # drop columns that are all-NaN
+    keep = ~np.all(np.isnan(traces), axis=0)
+    traces = traces[:, keep]
+    if traces.size == 0:
+        continue
+    m  = np.nanmean(traces, axis=1)
+    se = np.nanstd(traces, axis=1) / np.sqrt(traces.shape[1])
+    ax.plot(time_axis, m, linewidth=2, label=f"{label} (n={traces.shape[1]})")
+    ax.fill_between(time_axis, m - se, m + se, alpha=0.25)
+
+ax.axvline(0, linestyle='--')
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("ΔF/F (z)")
+ax.set_title("Peri-event PSTH by feedbackType (mean ± SEM)")
+ax.legend()
+plt.tight_layout()
+plt.show()
 
 #%%
-def plot_heatmap_psth(preprocessingtype=df_nph.zdFF): 
-    psth_good = preprocessingtype.values[psth_idx[:,(df_trials.feedbackType == 1)]]
-    psth_error = preprocessingtype.values[psth_idx[:,(df_trials.feedbackType == -1)]]
-    # Calculate averages and SEM
-    psth_good_avg = psth_good.mean(axis=1)
-    sem_good = psth_good.std(axis=1) / np.sqrt(psth_good.shape[1])
-    psth_error_avg = psth_error.mean(axis=1)
-    sem_error = psth_error.std(axis=1) / np.sqrt(psth_error.shape[1])
+# Build a time axis matching the PSTH matrix
+n_time, n_trials = photometry_feedback.shape
+time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_time, endpoint=False)
 
-    # Create the figure and gridspec
-    fig = plt.figure(figsize=(10, 12))
-    gs = fig.add_gridspec(2, 2, height_ratios=[3, 1])
+# Trial-wise meta
+ft     = behav["feedbackType"].to_numpy()      # -1 (incorrect), 1 (correct)
+contr  = behav["allContrasts"].to_numpy()
 
-    # Plot the heatmap and line plot for correct trials
-    ax1 = fig.add_subplot(gs[0, 0])
-    sns.heatmap(psth_good.T, cbar=False, ax=ax1) #, center = 0.0)
-    ax1.invert_yaxis()
-    ax1.axvline(x=30, color="white", alpha=0.9, linewidth=3, linestyle="dashed") 
-    ax1.set_title('Correct Trials')
+# Lighter grayscale palette (white↔black numbers: 1.0 = white, 0.0 = black)
+unique_contrasts = np.sort(np.unique(contr[~np.isnan(contr)]))
+n_levels = len(unique_contrasts)
 
-    ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
-    ax2.plot(psth_good_avg, color='#2f9c95', linewidth=3) 
-    # ax2.plot(psth_good, color='#2f9c95', linewidth=0.1, alpha=0.2)
-    ax2.fill_between(range(len(psth_good_avg)), psth_good_avg - sem_good, psth_good_avg + sem_good, color='#2f9c95', alpha=0.15)
-    ax2.axvline(x=30, color="black", alpha=0.9, linewidth=3, linestyle="dashed")
-    ax2.set_ylabel('Average Value')
-    ax2.set_xlabel('Time')
+# Make 5 (or n_levels) shades from very light to medium-dark
+# e.g., 0.92 (very light gray) → 0.35 (dark gray, not pure black)
+shades = np.linspace(0.92, 0.35, n_levels)  # lighter overall, evenly spaced
+contrast_to_color = {c: str(shade) for c, shade in zip(unique_contrasts, shades)}
 
-    # Plot the heatmap and line plot for incorrect trials
-    ax3 = fig.add_subplot(gs[0, 1], sharex=ax1)
-    sns.heatmap(psth_error.T, cbar=False, ax=ax3) #, center = 0.0)
-    ax3.invert_yaxis()
-    ax3.axvline(x=30, color="white", alpha=0.9, linewidth=3, linestyle="dashed") 
-    ax3.set_title('Incorrect Trials')
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True, constrained_layout=True)
+panels = [("Correct (1)",   ft == 1,  axes[0]),
+          ("Incorrect (-1)", ft == -1, axes[1])]
 
-    ax4 = fig.add_subplot(gs[1, 1], sharex=ax3, sharey=ax2)
-    ax4.plot(psth_error_avg, color='#d62828', linewidth=3)
-    ax4.fill_between(range(len(psth_error_avg)), psth_error_avg - sem_error, psth_error_avg + sem_error, color='#d62828', alpha=0.15)
-    ax4.axvline(x=30, color="black", alpha=0.9, linewidth=3, linestyle="dashed")
-    ax4.set_ylabel('Average Value')
-    ax4.set_xlabel('Time')
+for title, mask_ft, ax in panels:
+    # draw lighter first, darker last (so darker lines sit on top)
+    for c in unique_contrasts:
+        mask_c = np.isclose(contr, c, equal_nan=False)
+        col_mask = mask_ft & mask_c
+        if not np.any(col_mask):
+            continue
+        traces = photometry_feedback[:, col_mask]
+        keep = ~np.all(np.isnan(traces), axis=0)
+        traces = traces[:, keep]
+        if traces.size == 0:
+            continue
 
-    fig.suptitle(f'zdFF_{EVENT}_{subject}_{session_date}_{region}_{eid}', y=1, fontsize=14)
-    plt.tight_layout()
-    # plt.savefig(f'/mnt/h0/kb/data/psth_npy/Fig02_{EVENT}_{mouse}_{date}_{region}_{eid}.png')
-    plt.show() 
+        m  = np.nanmean(traces, axis=1)
+        se = np.nanstd(traces, axis=1) / np.sqrt(traces.shape[1])
 
-plot_heatmap_psth(df_nph.zdFF)
+        color = contrast_to_color[c]        # grayscale string
+        ax.plot(time_axis, m, lw=2.5, color=color, label=f"{c:g} (n={traces.shape[1]})")
+        ax.fill_between(time_axis, m - se, m + se, alpha=0.18, color=color)
+
+    ax.axvline(0, ls='--')
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("ΔF/F (z)")
+
+axes[1].legend(title="allContrasts", loc="best")
+
+# Hard-lock identical y-lims (sharey already syncs, this just guarantees)
+yl = (min(axes[0].get_ylim()[0], axes[1].get_ylim()[0]),
+      max(axes[0].get_ylim()[1], axes[1].get_ylim()[1]))
+for ax in axes:
+    ax.set_ylim(yl)
+
+plt.show()
+
+
+# %%
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap
+from matplotlib.colors import Normalize
+
+# Build time axis matching PSTH matrix
+n_time, n_trials = photometry_feedback.shape
+time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_time, endpoint=False)
+
+# Trial-wise meta
+ft    = behav["feedbackType"].to_numpy()      # -1 / 1
+contr = behav["allContrasts"].to_numpy()
+
+# Contrast levels
+unique_contrasts = np.sort(np.unique(contr[~np.isnan(contr)]))
+
+# --- Inferno colormap (higher contrast -> lighter/yellow). Use 'inferno_r' for higher -> darker.
+cmap = get_cmap('inferno_r')   # or 'inferno_r'
+norm = Normalize(vmin=unique_contrasts.min(), vmax=unique_contrasts.max())
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True, constrained_layout=True)
+panels = [("Correct (1)",   ft == 1,  axes[0]),
+          ("Incorrect (-1)", ft == -1, axes[1])]
+
+for title, mask_ft, ax in panels:
+    for c in unique_contrasts:
+        mask_c   = np.isclose(contr, c, equal_nan=False)
+        col_mask = mask_ft & mask_c
+        if not np.any(col_mask):
+            continue
+
+        traces = photometry_feedback[:, col_mask]
+        keep   = ~np.all(np.isnan(traces), axis=0)
+        traces = traces[:, keep]
+        if traces.size == 0:
+            continue
+
+        m  = np.nanmean(traces, axis=1)
+        se = np.nanstd(traces, axis=1) / np.sqrt(traces.shape[1])
+
+        color = cmap(norm(c))
+        ax.plot(time_axis, m, lw=2.5, color=color, label=f"{c:g} (n={traces.shape[1]})")
+        ax.fill_between(time_axis, m - se, m + se, alpha=0.25, color=color)
+
+    ax.axvline(0, ls='--')
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("ΔF/F (z)")
+
+# Shared colorbar for contrast levels
+sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+sm.set_array([])
+cbar = fig.colorbar(sm, ax=axes.ravel().tolist(), pad=0.02, shrink=0.9)
+cbar.set_label('allContrasts')
+
+# (sharey=True already syncs y; hard-lock just in case)
+yl = (min(axes[0].get_ylim()[0], axes[1].get_ylim()[0]),
+      max(axes[0].get_ylim()[1], axes[1].get_ylim()[1]))
+for ax in axes:
+    ax.set_ylim(yl)
+
+plt.show()
 
 # %%
