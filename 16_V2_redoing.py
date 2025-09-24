@@ -22,33 +22,15 @@ from one.api import ONE #always after the imports
 one = ONE() 
 
 
-table_path = '/home/kceniabougrova/Downloads/NewSessions_Aug2025_New.csv' 
+# table_path = '/home/kceniabougrova/Downloads/NewSessions_Aug2025_New.csv' 
+table_path = '/home/kceniabougrova/Downloads/new_sessions_Aug2025 - all_together.csv'
 sessions_list = pd.read_csv(table_path)
 
-def get_eid(mouse, date): 
-    eids = one.search(subject=mouse, date=date) 
-    if len(eids) == 0:
-        return None  # no session found
-    eid = str(eids[0])   # get the first one and make it a string
-    ref = one.eid2ref(eid)
-    print(eid)
-    print(ref) 
-    return eid
 
-
-def select_one_session(sessions_list, row=12):
-    subject = sessions_list.loc[row, "subject"]
-    date = sessions_list.loc[row, "date"]
-    region = sessions_list.loc[row, "region"]
-    nph_file_path = sessions_list.loc[row, "photometry_path_a"]
-    nph_bnc_path = sessions_list.loc[row, "digital_inputs_path"]
-    eid = get_eid(subject,date)
-    print(eid)
-    return eid, subject, date, region, nph_file_path, nph_bnc_path
-
+i = 1000 #select the session here
 
 eid, subject, date, region, nph_file_path, nph_bnc_path = select_one_session(
-    sessions_list, row=195)
+    sessions_list, row=i)
 
 
 old_prefix = '/mnt/h0/kb/'
@@ -145,7 +127,7 @@ df_bnc.columns = [col.replace("Value.", "") for col in df_bnc.columns]
 df_bnc = df_bnc[df_bnc["Value"] == True].reset_index(drop=True)
 
 tph = df_bnc["Timestamp"].values 
-
+sessions_list["ttl nph"][i] = len(tph)
 
 
 ##############################################################################
@@ -164,6 +146,8 @@ CHANGE INPUT AUTOMATICALLY
 
 
 tbpod = df_trials['stimOnTrigger_times'].values #bpod TTL times
+sessions_list.loc[i, "ttl behav"] = int(len(tbpod))
+
 
 best_cols, match_scores = find_matching_trials_column(df_trials, tph)
 
@@ -515,15 +499,22 @@ event_idx = np.searchsorted(array_timestamps, event_times) #check idx where they
 
 psth_idx += event_idx
 
-plt.figure(figsize=(15, 8))
+plt.figure(figsize=(10, 8))
 
 # Mask for correct vs incorrect/other
 mask_correct = df_trials.feedbackType.values == 1
 mask_incorrect = ~mask_correct
 
 # Plot trials separately
-plt.plot(time_axis, photometry_feedback[:, mask_correct], color='blue', linewidth=0.3, alpha=0.3)
-plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='red', linewidth=0.3, alpha=0.3)
+plt.plot(time_axis, photometry_feedback[:, mask_correct], color='#067bc2', linewidth=0.3, alpha=0.2)
+plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='#ef2b2b', linewidth=0.3, alpha=0.2) 
+
+# --- Mean traces on top ---
+mean_correct = np.nanmean(photometry_feedback[:, mask_correct], axis=1)
+mean_incorrect = np.nanmean(photometry_feedback[:, mask_incorrect], axis=1)
+
+plt.plot(time_axis, mean_correct, color='#067bc2', linewidth=3, label="Correct (mean)")
+plt.plot(time_axis, mean_incorrect, color='#ef2b2b', linewidth=3, label="Incorrect (mean)")
 
 # Event marker
 plt.axvline(x=0, color='black', linestyle='--')
@@ -531,6 +522,7 @@ plt.axvline(x=0, color='black', linestyle='--')
 plt.xlabel("Time (s)")
 plt.ylabel("ΔF/F (z-scored)")
 plt.title("Peri-feedback PSTH split by feedback type")
+plt.ylim(-2.5,5)
 plt.show()
 
 

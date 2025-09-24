@@ -20,14 +20,32 @@ one = ONE()
 
 """ LOAD TRIALS """ 
 
-def select_one_session(sessions_list, row=150):
+
+def get_eid(mouse, date): 
+    eids = one.search(subject=mouse, date=date) 
+    if len(eids) == 0:
+        return None  # no session found
+    eid = str(eids[0])   # get the first one and make it a string
+    ref = one.eid2ref(eid)
+    print(eid)
+    print(ref) 
+    return eid
+
+def select_one_session(sessions_list, row=12): 
     eid = sessions_list.loc[row, "eid"]
     subject = sessions_list.loc[row, "subject"]
     date = sessions_list.loc[row, "date"]
     region = sessions_list.loc[row, "region"]
     nph_file_path = sessions_list.loc[row, "photometry_path_a"]
+    if pd.isna(nph_file_path) or not nph_file_path:  # if empty or NaN
+        nph_file_path = sessions_list.loc[row, "photometry_path_b"]
     nph_bnc_path = sessions_list.loc[row, "digital_inputs_path"]
+    eid2 = get_eid(subject, date)
+    if eid2 != eid:
+        print(f"⚠️ Different eids for {subject} on {date}: {eid} vs {eid2}")
+    print(subject, date, eid)
     return eid, subject, date, region, nph_file_path, nph_bnc_path
+
 
 def find_matching_trials_column(df_trials, tph, verbose=True, max_ratio_diff=0.1, plot=True):
 # def find_matching_trials_column(df_trials, tph, verbose=True, max_ratio_diff=0.1):
@@ -202,22 +220,22 @@ def get_nph(source_path, rec):
     df_nphttl = pd.read_csv(source_folder+f"bonsai_DI{rec.nph_bnc}{rec.nph_file}.csv") 
     return df_nph, df_nphttl 
 
-def get_eid(rec): 
-    eids = one.search(subject=rec.mouse, date=rec.date) 
-    eid = eids[0]
-    ref = one.eid2ref(eid)
-    print(eid)
-    print(ref) 
-    # session_path_behav = f'/home/kceniabougrova/Documents/nph/Behav_2024Mar20/{rec.mouse}/{rec.date}/001/' 
-    base_path = f'/mnt/h0/kb/data/one/mainenlab/Subjects/{rec.mouse}/{rec.date}/' 
-    session_path_pattern = f'{base_path}00*/'
-    session_paths = glob.glob(session_path_pattern)
-    if session_paths:
-        session_path_behav = session_paths[0]  # or handle multiple matches as needed
-    else:
-        session_path_behav = None  # or handle the case where no matching path is found
-    file_path = '/mnt/h0/kb/data/one/mainenlab/Subjects/ZFM-04022/2022-12-30/001/alf/_ibl_trials.table.pqt'
-    df = pd.read_parquet(file_path)
+# def get_eid(rec): 
+#     eids = one.search(subject=rec.mouse, date=rec.date) 
+#     eid = eids[0]
+#     ref = one.eid2ref(eid)
+#     print(eid)
+#     print(ref) 
+#     # session_path_behav = f'/home/kceniabougrova/Documents/nph/Behav_2024Mar20/{rec.mouse}/{rec.date}/001/' 
+#     base_path = f'/mnt/h0/kb/data/one/mainenlab/Subjects/{rec.mouse}/{rec.date}/' 
+#     session_path_pattern = f'{base_path}00*/'
+#     session_paths = glob.glob(session_path_pattern)
+#     if session_paths:
+#         session_path_behav = session_paths[0]  # or handle multiple matches as needed
+#     else:
+#         session_path_behav = None  # or handle the case where no matching path is found
+#     file_path = '/mnt/h0/kb/data/one/mainenlab/Subjects/ZFM-04022/2022-12-30/001/alf/_ibl_trials.table.pqt'
+#     df = pd.read_parquet(file_path)
 
 
 
