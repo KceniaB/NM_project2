@@ -205,8 +205,8 @@ def load_trials_updated_for_sessions_with_task00(eid):
     trials = one.load_object(eid, 'trials', collection='alf')
 
     # Just in case, wrap in DataFrame if it's not already
-    if not isinstance(trials, pd.DataFrame):
-        trials = pd.DataFrame(trials)
+    # if not isinstance(trials, pd.DataFrame):
+    #     trials = pd.DataFrame(trials)
     ref = one.eid2ref(eid)
     subject = ref.subject
     session_date = str(ref.date) 
