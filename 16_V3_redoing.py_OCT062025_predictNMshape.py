@@ -1333,7 +1333,7 @@ import matplotlib.pyplot as plt
 # CONFIG
 # =========================================================
 BASE_DIR = "/home/kceniabougrova/Downloads/good_sessions_outputs/"
-SUBJECT = "ZFM-06272"   # 👈 change to any mouse name you want
+SUBJECT = "ZFM-04019"   # 👈 change to any mouse name you want
 EVENT = "feedback_times"
 PERIEVENT_WINDOW = [-1, 2]
 
@@ -1687,3 +1687,100 @@ for SUBJECT in subjects_with_multiple_fibers:
 
 
 
+
+
+
+
+
+
+#%%
+#%%
+#%%
+#%%
+#%%
+""" 
+KB 08102025
+select only the BCW sessions
+"""
+import os
+import numpy as np
+import pandas as pd
+
+# =========================================================
+# CONFIG
+# =========================================================
+BASE_DIR = "/home/kceniabougrova/Downloads/good_sessions_outputs/"
+excel_path = "/home/kceniabougrova/Downloads/new_sessions_Aug2025 - all_together_tab2.xlsx"
+
+# =========================================================
+# LOAD AND FILTER GOOD SESSIONS
+# =========================================================
+xls = pd.ExcelFile(excel_path)
+df_all = pd.read_excel(excel_path, sheet_name='new_sessions_Aug2025 - all_to-1')
+
+df_good = df_all[df_all["good"] == "G"].reset_index(drop=True)
+print(f"✅ Loaded {len(df_good)} 'good' sessions")
+
+# =========================================================
+# FIND FILES THAT MATCH THE BCW PROBABILITY CRITERIA
+# =========================================================
+allowed_sets = [{0.5, 0.2}, {0.5, 0.8}, {0.5, 0.2, 0.8}]
+good_sessions_BCW = []
+
+for i, row in df_good.iterrows():
+    subject = row["subject"]
+    date = str(row["date"])[:10]
+    region = row["region"]
+    eid = row["eid"]
+
+    # --- Locate corresponding df_trials file
+    df_trials_file = [
+        f for f in os.listdir(BASE_DIR)
+        if f.startswith("df_trials_") and subject in f and date in f and region in f and eid in f
+    ]
+
+    if not df_trials_file:
+        # No trials file found
+        continue
+
+    try:
+        df_trials = pd.read_csv(os.path.join(BASE_DIR, df_trials_file[0]))
+        probs = set(np.round(df_trials["probabilityLeft"].dropna().unique(), 2))
+
+        if probs in allowed_sets:
+            good_sessions_BCW.append(row)
+
+    except Exception as e:
+        print(f"⚠️ Error reading {subject} {date} {region}: {e}")
+
+# =========================================================
+# CREATE THE FILTERED DF
+# =========================================================
+df_good_BCW = pd.DataFrame(good_sessions_BCW).reset_index(drop=True)
+print(f"✅ Created df_good_BCW with {len(df_good_BCW)} sessions (biased protocols only)")
+
+# Optionally save it
+output_path = "/home/kceniabougrova/Downloads/df_good_BCW.xlsx"
+df_good_BCW.to_excel(output_path, index=False)
+print(f"💾 Saved -> {output_path}")
+
+# =========================================================
+# Count rows for each unique pair of subject × fiber
+# =========================================================
+df_counts = (
+    df_good_BCW
+    .groupby(['subject', 'fiber'])
+    .size()                      # counts rows per group
+    .reset_index(name='n_sessions')  # rename the count column
+    .sort_values(['subject', 'fiber'])
+    .reset_index(drop=True)
+)
+
+print("📊 Number of sessions per subject × fiber:")
+print(df_counts)
+
+
+#%%
+""" 
+
+"""
