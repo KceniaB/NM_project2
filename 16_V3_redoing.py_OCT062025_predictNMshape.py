@@ -1791,6 +1791,50 @@ df_good_BCW.to_excel(output_path, index=False)
 print(f"💾 Saved -> {output_path}")
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+""" IMPORTANT 10102025 """
 #%%
 """ 
 #########################################################################################
@@ -1864,12 +1908,14 @@ time_diffs = df_nph["times"].diff().dropna()
 fs = 1/time_diffs.median()
 fs
 
+EVENT = "stimOnTrigger_times"
+EVENT = "feedback_times"
 PERIEVENT_WINDOW = [-1, 2]
 
 photometry_feedback, idx_psth = psth(
     calcium=df_nph.zdFF.values,
     times=df_nph.times.values,
-    t_events=df_trials["stimOnTrigger_times"].values,
+    t_events=df_trials[EVENT].values,
     fs=fs,
     peri_event_window=PERIEVENT_WINDOW
 )
@@ -1895,80 +1941,8 @@ plt.xlabel("Time (s)")
 plt.ylabel("ΔF/F (z-scored)")
 plt.title("Peri-feedback PSTH split by feedback type")
 plt.ylim(-1.5,3)
-plt.show()
-# # %%
-# """ 
-# #########################################################################################
-# # =========================================================
-# # PLOT allContrasts ALIGNED TO EVENT
-# # change event and peri_event_window
-# # =========================================================
-# """ 
-# from functions import *
-# import numpy as np
-# import matplotlib.pyplot as plt
+plt.show() 
 
-# # =========================================================
-# # Compute sampling rate
-# # =========================================================
-# time_diffs = df_nph["times"].diff().dropna()
-# fs = 1 / time_diffs.median()
-
-# # =========================================================
-# # Build PSTH (peri-event calcium)
-# # =========================================================
-# PERIEVENT_WINDOW = [-1, 2]
-
-# photometry_feedback, idx_psth = psth(
-#     calcium=df_nph.zdFF.values,
-#     times=df_nph.times.values,
-#     t_events=df_trials["feedback_times"].values,
-#     fs=fs,
-#     peri_event_window=PERIEVENT_WINDOW
-# )
-# n_timepoints = photometry_feedback.shape[0]
-# time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
-
-# # =========================================================
-# # SPLIT BY CONTRAST LEVELS
-# # =========================================================
-# unique_contrasts = np.sort(df_trials["allContrasts"].dropna().unique())
-# print(f"🎯 Found {len(unique_contrasts)} contrast levels: {unique_contrasts}")
-
-# # Define color palette
-# import seaborn as sns
-# colors = sns.color_palette("coolwarm", len(unique_contrasts))  # or "viridis"
-
-# plt.figure(figsize=(10, 8))
-
-# for i, contrast in enumerate(unique_contrasts):
-#     mask_contrast = df_trials["allContrasts"] == contrast
-#     mask_correct = mask_contrast & (df_trials["feedbackType"] == 1)
-#     mask_incorrect = mask_contrast & (df_trials["feedbackType"] != 1)
-
-#     # --- Compute mean for each subset ---
-#     mean_correct = np.nanmean(photometry_feedback[:, mask_correct], axis=1)
-#     mean_incorrect = np.nanmean(photometry_feedback[:, mask_incorrect], axis=1)
-
-#     # --- Plot ---
-#     plt.plot(time_axis, mean_correct, color=colors[i], linewidth=2.5,
-#              label=f"Contrast {contrast:.2f} — Correct")
-#     plt.plot(time_axis, mean_incorrect, color=colors[i], linestyle='--', linewidth=2.5,
-#              alpha=0.8, label=f"Contrast {contrast:.2f} — Incorrect")
-
-# # =========================================================
-# # FINAL FORMATTING
-# # =========================================================
-# plt.axvline(0, color='black', linestyle='--', linewidth=1)
-# plt.xlabel("Time (s)")
-# plt.ylabel("ΔF/F (z-scored)")
-# plt.title("Peri-feedback PSTH split by contrast × correctness")
-# plt.legend(frameon=False, ncol=2)
-# plt.tight_layout()
-# # plt.ylim(-1.5, 3)
-# plt.show()
-
-# # %%
 # %%
 """
 #########################################################################################
@@ -1986,8 +1960,9 @@ import seaborn as sns
 # CONFIG
 # =========================================================
 EVENT = "stimOnTrigger_times"
+EVENT = "feedback_times"
 PERIEVENT_WINDOW = [-1, 2]
-split_by_correct = False   # 👈 toggle here (True → split by correct/incorrect; False → average all)
+split_by_correct = True   # 👈 toggle here (True → split by correct/incorrect; False → average all)
 palette = "inferno_r"      # try "viridis", "rocket", "crest", "coolwarm"
 
 # =========================================================
@@ -2124,7 +2099,7 @@ plt.axvline(0, color='k', linestyle='--', linewidth=1)
 plt.xlabel("Time relative to feedback (s)")
 plt.ylabel("ΔF/F (z-scored)")
 plt.title("ΔF/F trace per trial (aligned at feedback = 0)")
-plt.xlim(-2,2)
+plt.xlim(-2,2.55)
 
 plt.tight_layout()
 plt.show()
@@ -2147,8 +2122,8 @@ import matplotlib.pyplot as plt
 # =========================================================
 # CONFIG
 # =========================================================
-EVENT = "feedback_times"
-PERIEVENT_WINDOW = [-1, 2]
+EVENT = "stimOnTrigger_times"
+PERIEVENT_WINDOW = [-5, 5]
 
 # =========================================================
 # Compute sampling rate
@@ -2276,13 +2251,23 @@ plt.show()
 #########################################################################################
 ######################################################################################### 
 """ 
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt 
+import seaborn as sns 
+from functions import *
+import sys
+sys.path.insert(0, "/home/kceniabougrova/Documents/GitHub/ibl-photometry/src")
+
 
 df_good_BCW = pd.read_excel("/home/kceniabougrova/Downloads/good_sessions_outputs/df_good_BCW.xlsx")
 
 i = 5
 row = df_good_BCW.iloc[i]
 
+# =========================================================
 # Extract metadata
+# =========================================================
 subject = row['subject']
 date = str(row['date'])[:10]
 region = row['region']
@@ -2344,111 +2329,43 @@ time_diffs = df_nph["times"].diff().dropna()
 fs = 1/time_diffs.median()
 fs
 
+EVENT = "stimOnTrigger_times"
+EVENTS = ["stimOnTrigger_times", "feedback_times"]
+
 PERIEVENT_WINDOW = [-1, 2]
 
-photometry_feedback, idx_psth = psth(
-    calcium=df_nph.zdFF.values,
-    times=df_nph.times.values,
-    t_events=df_trials["stimOnTrigger_times"].values,
-    fs=fs,
-    peri_event_window=PERIEVENT_WINDOW
-)
+for event in EVENTS: 
+    photometry_feedback, idx_psth = psth(
+        calcium=df_nph.zdFF.values,
+        times=df_nph.times.values,
+        t_events=df_trials[event].values,
+        fs=fs,
+        peri_event_window=PERIEVENT_WINDOW
+    )
 
-n_timepoints = photometry_feedback.shape[0]
-time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
+    n_timepoints = photometry_feedback.shape[0]
+    time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
 
-plt.figure(figsize=(10, 6))
-# Mask for correct vs incorrect/other
-mask_correct = df_trials.feedbackType.values == 1
-mask_incorrect = ~mask_correct
-# Plot trials separately
-plt.plot(time_axis, photometry_feedback[:, mask_correct], color='#067bc2', linewidth=0.3, alpha=0.2)
-plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='#ef2b2b', linewidth=0.3, alpha=0.2) 
-# --- Mean traces on top ---
-mean_correct = np.nanmean(photometry_feedback[:, mask_correct], axis=1)
-mean_incorrect = np.nanmean(photometry_feedback[:, mask_incorrect], axis=1)
-plt.plot(time_axis, mean_correct, color='#067bc2', linewidth=3, label="Correct (mean)")
-plt.plot(time_axis, mean_incorrect, color='#ef2b2b', linewidth=3, label="Incorrect (mean)")
-# Event marker
-plt.axvline(x=0, color='black', linestyle='--')
-plt.xlabel("Time (s)")
-plt.ylabel("ΔF/F (z-scored)")
-plt.title("Peri-feedback PSTH split by feedback type")
-plt.ylim(-1.5,3)
-plt.show()
-# # %%
-# """ 
-# #########################################################################################
-# # =========================================================
-# # PLOT allContrasts ALIGNED TO EVENT
-# # change event and peri_event_window
-# # =========================================================
-# """ 
-# from functions import *
-# import numpy as np
-# import matplotlib.pyplot as plt
+    plt.figure(figsize=(8, 6))
+    # Mask for correct vs incorrect/other
+    mask_correct = df_trials.feedbackType.values == 1
+    mask_incorrect = ~mask_correct
+    # Plot trials separately
+    plt.plot(time_axis, photometry_feedback[:, mask_correct], color='#067bc2', linewidth=0.3, alpha=0.2)
+    plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='#ef2b2b', linewidth=0.3, alpha=0.2) 
+    # --- Mean traces on top ---
+    mean_correct = np.nanmean(photometry_feedback[:, mask_correct], axis=1)
+    mean_incorrect = np.nanmean(photometry_feedback[:, mask_incorrect], axis=1)
+    plt.plot(time_axis, mean_correct, color='#067bc2', linewidth=3, label="Correct (mean)")
+    plt.plot(time_axis, mean_incorrect, color='#ef2b2b', linewidth=3, label="Incorrect (mean)")
+    # Event marker
+    plt.axvline(x=0, color='black', linestyle='--')
+    plt.xlabel("Time (s)")
+    plt.ylabel("ΔF/F (z-scored)")
+    plt.title("Peri-feedback PSTH split by feedback type")
+    plt.ylim(-1,2)
+    plt.show()
 
-# # =========================================================
-# # Compute sampling rate
-# # =========================================================
-# time_diffs = df_nph["times"].diff().dropna()
-# fs = 1 / time_diffs.median()
-
-# # =========================================================
-# # Build PSTH (peri-event calcium)
-# # =========================================================
-# PERIEVENT_WINDOW = [-1, 2]
-
-# photometry_feedback, idx_psth = psth(
-#     calcium=df_nph.zdFF.values,
-#     times=df_nph.times.values,
-#     t_events=df_trials["feedback_times"].values,
-#     fs=fs,
-#     peri_event_window=PERIEVENT_WINDOW
-# )
-# n_timepoints = photometry_feedback.shape[0]
-# time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
-
-# # =========================================================
-# # SPLIT BY CONTRAST LEVELS
-# # =========================================================
-# unique_contrasts = np.sort(df_trials["allContrasts"].dropna().unique())
-# print(f"🎯 Found {len(unique_contrasts)} contrast levels: {unique_contrasts}")
-
-# # Define color palette
-# import seaborn as sns
-# colors = sns.color_palette("coolwarm", len(unique_contrasts))  # or "viridis"
-
-# plt.figure(figsize=(10, 8))
-
-# for i, contrast in enumerate(unique_contrasts):
-#     mask_contrast = df_trials["allContrasts"] == contrast
-#     mask_correct = mask_contrast & (df_trials["feedbackType"] == 1)
-#     mask_incorrect = mask_contrast & (df_trials["feedbackType"] != 1)
-
-#     # --- Compute mean for each subset ---
-#     mean_correct = np.nanmean(photometry_feedback[:, mask_correct], axis=1)
-#     mean_incorrect = np.nanmean(photometry_feedback[:, mask_incorrect], axis=1)
-
-#     # --- Plot ---
-#     plt.plot(time_axis, mean_correct, color=colors[i], linewidth=2.5,
-#              label=f"Contrast {contrast:.2f} — Correct")
-#     plt.plot(time_axis, mean_incorrect, color=colors[i], linestyle='--', linewidth=2.5,
-#              alpha=0.8, label=f"Contrast {contrast:.2f} — Incorrect")
-
-# # =========================================================
-# # FINAL FORMATTING
-# # =========================================================
-# plt.axvline(0, color='black', linestyle='--', linewidth=1)
-# plt.xlabel("Time (s)")
-# plt.ylabel("ΔF/F (z-scored)")
-# plt.title("Peri-feedback PSTH split by contrast × correctness")
-# plt.legend(frameon=False, ncol=2)
-# plt.tight_layout()
-# # plt.ylim(-1.5, 3)
-# plt.show()
-
-# # %%
 # %%
 """
 #########################################################################################
@@ -2465,9 +2382,9 @@ import seaborn as sns
 # =========================================================
 # CONFIG
 # =========================================================
-EVENT = "stimOnTrigger_times"
+EVENT = "feedback_times"
 PERIEVENT_WINDOW = [-1, 2]
-split_by_correct = False   # 👈 toggle here (True → split by correct/incorrect; False → average all)
+split_by_correct = True   # 👈 toggle here (True → split by correct/incorrect; False → average all)
 palette = "inferno_r"      # try "viridis", "rocket", "crest", "coolwarm"
 
 # =========================================================
@@ -2499,7 +2416,7 @@ print(f"🎯 Found {len(unique_contrasts)} contrast levels: {unique_contrasts}")
 # Define color palette
 colors = sns.color_palette(palette, len(unique_contrasts))
 
-plt.figure(figsize=(10, 8))
+plt.figure(figsize=(8, 6))
 
 for i, contrast in enumerate(unique_contrasts):
     mask_contrast = df_trials["allContrasts"] == contrast
@@ -2930,8 +2847,8 @@ from functions import psth
 # =========================================================
 BASE_DIR = "/home/kceniabougrova/Downloads/good_sessions_outputs/"
 SUBJECT = "ZFM-04026"     # 👈 choose subject
-window_baseline = [-0.05, 0]
-window_response = [0.01, 0.9]
+window_baseline = [-0.1, 0]
+window_response = [0.01, 0.5]
 
 # =========================================================
 # Load metadata table
@@ -3105,8 +3022,721 @@ plt.tight_layout()
 plt.show()
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # %%
 """
 #########################################################################################
 #########################################################################################
 #########################################################################################
+10102025
+this code plots all sessions from 1 subject - TO CHECK!!!!! 
+"""
+
+# %%
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import cm
+
+# =========================================================
+# SETTINGS
+# =========================================================
+EVENTS = ["stimOnTrigger_times", "feedback_times"]
+PERIEVENT_WINDOW = [-1, 2]
+cmap = cm.get_cmap("inferno_r")
+
+
+
+subject = "ZFM-04019"   
+df_mouse = df_good_BCW[df_good_BCW["subject"] == subject].reset_index(drop=True)
+print(f"🐭 Found {len(df_mouse)} sessions for {subject}")
+
+# =========================================================
+# Load and concatenate all sessions
+# =========================================================
+all_trials = []
+all_nph = []
+
+time_offset = 0  # initialize outside the loop
+
+for idx, row in df_mouse.iterrows():
+    date = str(row["date"])[:10]
+    region = row["region"]
+    eid = row["eid"]
+
+    # Locate corresponding files
+    df_trials_file = [
+        f for f in os.listdir(BASE_DIR)
+        if f.startswith("df_trials_")
+        and subject in f
+        and date in f
+        and region in f
+        and eid in f
+    ]
+    df_nph_file = [
+        f for f in os.listdir(BASE_DIR)
+        if f.startswith("df_nph_")
+        and subject in f
+        and date in f
+        and region in f
+        and eid in f
+    ]
+
+    if not df_trials_file or not df_nph_file:
+        print(f"⚠️ Missing files for {subject} | {date} | {region} | {eid}")
+        continue
+
+    # Load
+    df_trials = pd.read_csv(os.path.join(BASE_DIR, df_trials_file[0]))
+    df_nph = pd.read_csv(os.path.join(BASE_DIR, df_nph_file[0]))
+
+    print(f"✅ Loaded {date} | {region} | {eid}")
+    print(f"   df_trials: {df_trials.shape}, df_nph: {df_nph.shape}")
+    
+    # Apply per-session offset so times are unique
+    df_nph["times"] += time_offset
+    for ev in ["stimOnTrigger_times", "feedback_times"]:
+        if ev in df_trials.columns:
+            df_trials[ev] += time_offset
+
+    # Update cumulative offset (add small gap between sessions)
+    time_offset += df_nph["times"].iloc[-1] + 5
+
+
+    # Store with session identifier
+    df_trials["session_id"] = f"{date}_{region}_{eid}"
+    df_nph["session_id"] = f"{date}_{region}_{eid}"
+
+    all_trials.append(df_trials)
+    all_nph.append(df_nph)
+
+# Concatenate all sessions
+if not all_trials or not all_nph:
+    raise ValueError("No valid sessions found for this subject.")
+
+df_trials_all = pd.concat(all_trials, ignore_index=True)
+df_nph_all = pd.concat(all_nph, ignore_index=True)
+
+print(f"📊 Combined df_trials_all shape: {df_trials_all.shape}")
+print(f"📈 Combined df_nph_all shape: {df_nph_all.shape}")
+
+# =========================================================
+# Compute sampling frequency (fs)
+# =========================================================
+time_diffs = df_nph_all["times"].diff().dropna()
+fs = 1 / time_diffs.median()
+print(f"⏱ Sampling rate: {fs:.2f} Hz")
+
+
+
+
+
+# =========================================================
+# LOOP THROUGH EVENTS
+# =========================================================
+for event in EVENTS:
+    print(f"\n🎬 Processing {event}...")
+
+    # Get unique contrast levels (sorted)
+    contrasts = np.sort(df_trials_all["allContrasts"].dropna().unique())
+    colors = cmap(np.linspace(0, 1, len(contrasts)))
+
+    plt.figure(figsize=(8, 6))
+
+    for i, contrast in enumerate(contrasts):
+        mask = df_trials_all["allContrasts"] == contrast
+
+        # Compute PSTH only for these trials
+        photometry_event, idx_psth = psth(
+            calcium=df_nph_all["zdFF"].values,
+            times=df_nph_all["times"].values,
+            t_events=df_trials_all.loc[mask, event].values,
+            fs=fs,
+            peri_event_window=PERIEVENT_WINDOW
+        )
+
+
+        # Mean trace and error
+        mean_trace = np.nanmean(photometry_event, axis=1)
+        sem_trace = np.nanstd(photometry_event, axis=1) / np.sqrt(photometry_event.shape[1])
+
+        n_timepoints = photometry_event.shape[0]
+        time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
+
+        # Plot mean + SEM shadow
+        plt.plot(time_axis, mean_trace, color=colors[i], lw=2.5, label=f"{contrast:.2f}")
+        plt.fill_between(time_axis,
+                         mean_trace - sem_trace,
+                         mean_trace + sem_trace,
+                         color=colors[i],
+                         alpha=0.25)
+
+    plt.axvline(0, color="black", linestyle="--")
+    plt.xlabel("Time (s)")
+    plt.ylabel("ΔF/F (z-scored)")
+    plt.title(f"{subject} — Combined sessions — {event}")
+    plt.legend(title="allContrasts", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    plt.show()
+
+# %%
+""" same - to check!!!!! """
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import cm
+
+# =========================================================
+# SETTINGS
+# =========================================================
+EVENTS = ["stimOnTrigger_times", "feedback_times"]
+PERIEVENT_WINDOW = [-1, 2]
+cmap = cm.get_cmap("inferno_r")
+
+subject = "ZFM-04022"
+df_mouse = df_good_BCW[df_good_BCW["subject"] == subject].reset_index(drop=True)
+print(f"🐭 Found {len(df_mouse)} sessions for {subject}")
+
+# =========================================================
+# Load and concatenate all sessions
+# =========================================================
+all_trials = []
+all_nph = []
+time_offset = 0  # initialize outside the loop
+
+for idx, row in df_mouse.iterrows():
+    date = str(row["date"])[:10]
+    region = row["region"]
+    eid = row["eid"]
+
+    # Locate corresponding files
+    df_trials_file = [
+        f for f in os.listdir(BASE_DIR)
+        if f.startswith("df_trials_")
+        and subject in f
+        and date in f
+        and region in f
+        and eid in f
+    ]
+    df_nph_file = [
+        f for f in os.listdir(BASE_DIR)
+        if f.startswith("df_nph_")
+        and subject in f
+        and date in f
+        and region in f
+        and eid in f
+    ]
+
+    if not df_trials_file or not df_nph_file:
+        print(f"⚠️ Missing files for {subject} | {date} | {region} | {eid}")
+        continue
+
+    # Load
+    df_trials = pd.read_csv(os.path.join(BASE_DIR, df_trials_file[0]))
+    df_nph = pd.read_csv(os.path.join(BASE_DIR, df_nph_file[0]))
+
+    print(f"✅ Loaded {date} | {region} | {eid}")
+    print(f"   df_trials: {df_trials.shape}, df_nph: {df_nph.shape}")
+
+    # Apply per-session offset so times are unique
+    df_nph["times"] += time_offset
+    for ev in ["stimOnTrigger_times", "feedback_times"]:
+        if ev in df_trials.columns:
+            df_trials[ev] += time_offset
+
+    # Update cumulative offset (add small gap between sessions)
+    time_offset += df_nph["times"].iloc[-1] + 5
+
+    # Store with session identifier
+    df_trials["session_id"] = f"{date}_{region}_{eid}"
+    df_nph["session_id"] = f"{date}_{region}_{eid}"
+
+    all_trials.append(df_trials)
+    all_nph.append(df_nph)
+
+# Concatenate all sessions
+if not all_trials or not all_nph:
+    raise ValueError("No valid sessions found for this subject.")
+
+df_trials_all = pd.concat(all_trials, ignore_index=True)
+df_nph_all = pd.concat(all_nph, ignore_index=True)
+
+print(f"📊 Combined df_trials_all shape: {df_trials_all.shape}")
+print(f"📈 Combined df_nph_all shape: {df_nph_all.shape}")
+
+# =========================================================
+# Compute sampling frequency (fs)
+# =========================================================
+time_diffs = df_nph_all["times"].diff().dropna()
+fs = 1 / time_diffs.median()
+print(f"⏱ Sampling rate: {fs:.2f} Hz")
+
+# =========================================================
+# PLOT: 3 SUBPLOTS (stimOn, feedback correct, feedback incorrect)
+# =========================================================
+fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+titles = ["Stimulus Onset", "Feedback (Correct)", "Feedback (Incorrect)"]
+conditions = [
+    {"event": "stimOnTrigger_times", "mask": np.ones(len(df_trials_all), dtype=bool)},
+    {"event": "feedback_times", "mask": df_trials_all["feedbackType"] == 1},
+    {"event": "feedback_times", "mask": df_trials_all["feedbackType"] != 1},
+]
+
+for ax, title, cond in zip(axes, titles, conditions):
+    event = cond["event"]
+    mask_trials = cond["mask"]
+
+    # Get unique contrast levels
+    contrasts = np.sort(df_trials_all["allContrasts"].dropna().unique())
+    colors = cmap(np.linspace(0, 1, len(contrasts)))
+
+    for i, contrast in enumerate(contrasts):
+        mask_contrast = mask_trials & (df_trials_all["allContrasts"] == contrast)
+
+        # Compute PSTH only for these trials
+        photometry_event, idx_psth = psth(
+            calcium=df_nph_all["zdFF"].values,
+            times=df_nph_all["times"].values,
+            t_events=df_trials_all.loc[mask_contrast, event].values,
+            fs=fs,
+            peri_event_window=PERIEVENT_WINDOW
+        )
+
+        if photometry_event.size == 0:
+            continue
+
+        # Compute mean ± SEM
+        mean_trace = np.nanmean(photometry_event, axis=1)
+        sem_trace = np.nanstd(photometry_event, axis=1) / np.sqrt(photometry_event.shape[1])
+
+        n_timepoints = photometry_event.shape[0]
+        time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
+
+        # Plot mean + shadow
+        ax.plot(time_axis, mean_trace, color=colors[i], lw=2.5, label=f"{contrast:.2f}")
+        ax.fill_between(time_axis,
+                        mean_trace - sem_trace,
+                        mean_trace + sem_trace,
+                        color=colors[i],
+                        alpha=0.25)
+
+    # Common formatting
+    ax.axvline(0, color="black", linestyle="--")
+    ax.set_xlabel("Time (s)")
+    ax.set_title(title)
+
+axes[0].set_ylabel("ΔF/F (z-scored)")
+axes[0].legend(title="allContrasts", bbox_to_anchor=(1.05, 1), loc="upper left")
+
+fig.suptitle(f"{subject} — Combined sessions — Mean ± SEM", fontsize=14, weight="bold")
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+plt.show()
+
+# %%
+""" same, but now loops through all the unique mice and fibers """ 
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import cm
+
+# =========================================================
+# SETTINGS
+# =========================================================
+EVENTS = ["stimOnTrigger_times", "feedback_times"]
+PERIEVENT_WINDOW = [-1, 2]
+cmap = cm.get_cmap("inferno_r")
+
+# Load metadata
+df_good_BCW = pd.read_excel(os.path.join(BASE_DIR, "df_good_BCW.xlsx"))
+
+# # Get all subjects present
+# subjects = df_good_BCW["subject"].unique()
+# print(f"🐭 Found {len(subjects)} unique subjects: {', '.join(subjects)}")
+
+# # =========================================================
+# # LOOP THROUGH SUBJECTS
+# # =========================================================
+# for subject in subjects:
+#     print(f"\n===============================")
+#     print(f"🐭 Processing subject: {subject}")
+#     print(f"===============================")
+
+#     df_mouse = df_good_BCW[df_good_BCW["subject"] == subject].reset_index(drop=True)
+#     print(f"📦 {len(df_mouse)} sessions for {subject}")
+""" ORRRRRR """
+# =========================================================
+# GROUP BY UNIQUE SUBJECT × REGION (fiber)
+# =========================================================
+grouped = df_good_BCW.groupby(["subject", "fiber"])
+print(f"🔎 Found {len(grouped)} unique subject × unique fiber")
+
+for (subject, fiber), df_mouse in grouped:
+    print(f"\n===============================")
+    print(f"🐭 Processing {subject} — {fiber}")
+    print(f"===============================")
+
+
+    df_mouse = df_mouse.reset_index(drop=True)
+    print(f"📦 {len(df_mouse)} sessions for {subject} ({region})")
+
+
+    # =========================================================
+    # Load and concatenate all sessions
+    # =========================================================
+    all_trials = []
+    all_nph = []
+    time_offset = 0
+
+    for idx, row in df_mouse.iterrows():
+        date = str(row["date"])[:10]
+        region = row["region"]
+        eid = row["eid"]
+
+        # Locate corresponding files
+        df_trials_file = [
+            f for f in os.listdir(BASE_DIR)
+            if f.startswith("df_trials_")
+            and subject in f
+            and date in f
+            and region in f
+            and eid in f
+        ]
+        df_nph_file = [
+            f for f in os.listdir(BASE_DIR)
+            if f.startswith("df_nph_")
+            and subject in f
+            and date in f
+            and region in f
+            and eid in f
+        ]
+
+        if not df_trials_file or not df_nph_file:
+            print(f"⚠️ Missing files for {subject} | {date} | {region} | {eid}")
+            continue
+
+        # Load
+        df_trials = pd.read_csv(os.path.join(BASE_DIR, df_trials_file[0]))
+        df_nph = pd.read_csv(os.path.join(BASE_DIR, df_nph_file[0]))
+
+        # Apply per-session offset so times are unique
+        df_nph["times"] += time_offset
+        for ev in ["stimOnTrigger_times", "feedback_times"]:
+            if ev in df_trials.columns:
+                df_trials[ev] += time_offset
+
+        # Update cumulative offset (+ small gap)
+        time_offset += df_nph["times"].iloc[-1] + 5
+
+        # Store with session identifier
+        df_trials["session_id"] = f"{date}_{region}_{eid}"
+        df_nph["session_id"] = f"{date}_{region}_{eid}"
+
+        all_trials.append(df_trials)
+        all_nph.append(df_nph)
+
+    # Skip if subject has no valid sessions
+    if not all_trials or not all_nph:
+        print(f"⚠️ No valid sessions found for {subject}")
+        continue
+
+    # Concatenate
+    df_trials_all = pd.concat(all_trials, ignore_index=True)
+    df_nph_all = pd.concat(all_nph, ignore_index=True)
+
+    print(f"📊 Combined df_trials_all shape: {df_trials_all.shape}")
+    print(f"📈 Combined df_nph_all shape: {df_nph_all.shape}")
+
+    # =========================================================
+    # Compute sampling frequency
+    # =========================================================
+    time_diffs = df_nph_all["times"].diff().dropna()
+    fs = 1 / time_diffs.median()
+    print(f"⏱ Sampling rate: {fs:.2f} Hz")
+
+    # =========================================================
+    # PLOT: 3 SUBPLOTS (stimOn, feedback correct, feedback incorrect)
+    # =========================================================
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+    titles = ["Stimulus Onset", "Feedback (Correct)", "Feedback (Incorrect)"]
+    conditions = [
+        {"event": "stimOnTrigger_times", "mask": np.ones(len(df_trials_all), dtype=bool)},
+        {"event": "feedback_times", "mask": df_trials_all["feedbackType"] == 1},
+        {"event": "feedback_times", "mask": df_trials_all["feedbackType"] != 1},
+    ]
+
+    for ax, title, cond in zip(axes, titles, conditions):
+        event = cond["event"]
+        mask_trials = cond["mask"]
+
+        contrasts = np.sort(df_trials_all["allContrasts"].dropna().unique())
+        colors = cmap(np.linspace(0, 1, len(contrasts)))
+
+        for i, contrast in enumerate(contrasts):
+            mask_contrast = mask_trials & (df_trials_all["allContrasts"] == contrast)
+
+            # Compute PSTH
+            photometry_event, idx_psth = psth(
+                calcium=df_nph_all["zdFF"].values,
+                times=df_nph_all["times"].values,
+                t_events=df_trials_all.loc[mask_contrast, event].values,
+                fs=fs,
+                peri_event_window=PERIEVENT_WINDOW
+            )
+
+            if photometry_event.size == 0:
+                continue
+
+            mean_trace = np.nanmean(photometry_event, axis=1)
+            sem_trace = np.nanstd(photometry_event, axis=1) / np.sqrt(photometry_event.shape[1])
+
+            n_timepoints = photometry_event.shape[0]
+            time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
+
+            ax.plot(time_axis, mean_trace, color=colors[i], lw=2.5, label=f"{contrast:.2f}")
+            ax.fill_between(time_axis,
+                            mean_trace - sem_trace,
+                            mean_trace + sem_trace,
+                            color=colors[i],
+                            alpha=0.25)
+
+        ax.axvline(0, color="black", linestyle="--")
+        ax.set_xlabel("Time (s)")
+        ax.set_title(title)
+
+    axes[0].set_ylabel("ΔF/F (z-scored)")
+    axes[0].legend(title="allContrasts", bbox_to_anchor=(1.05, 1), loc="upper left")
+
+    fig.suptitle(f"{subject} — Combined sessions — Mean ± SEM", fontsize=14, weight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.show()
+
+
+
+
+
+#%%
+"""
+3 subplots - signed contrasts - loops through all the mice 
+""" 
+# %%
+""" same, but now loops through all the unique mice and fibers """ 
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import cm
+
+# =========================================================
+# SETTINGS
+# =========================================================
+EVENTS = ["stimOnTrigger_times", "feedback_times"]
+PERIEVENT_WINDOW = [-1, 2]
+cmap = cm.get_cmap("inferno_r")
+
+# Load metadata
+df_good_BCW = pd.read_excel(os.path.join(BASE_DIR, "df_good_BCW.xlsx"))
+
+# Get all subjects present
+subjects = df_good_BCW["subject"].unique()
+print(f"🐭 Found {len(subjects)} unique subjects: {', '.join(subjects)}")
+
+# =========================================================
+# LOOP THROUGH SUBJECTS
+# =========================================================
+for subject in subjects:
+    print(f"\n===============================")
+    print(f"🐭 Processing subject: {subject}")
+    print(f"===============================")
+
+    df_mouse = df_good_BCW[df_good_BCW["subject"] == subject].reset_index(drop=True)
+    print(f"📦 {len(df_mouse)} sessions for {subject}")
+    """ ORRRRRR """
+    # # =========================================================
+    # # GROUP BY UNIQUE SUBJECT × REGION (fiber)
+    # # =========================================================
+    # grouped = df_good_BCW.groupby(["subject", "fiber"])
+    # print(f"🔎 Found {len(grouped)} unique subject × unique fiber")
+
+    # for (subject, fiber), df_mouse in grouped:
+    #     print(f"\n===============================")
+    #     print(f"🐭 Processing {subject} — {fiber}")
+    #     print(f"===============================")
+
+
+    #     df_mouse = df_mouse.reset_index(drop=True)
+    #     print(f"📦 {len(df_mouse)} sessions for {subject} ({region})")
+
+
+    # =========================================================
+    # Load and concatenate all sessions
+    # =========================================================
+    all_trials = []
+    all_nph = []
+    time_offset = 0
+
+    for idx, row in df_mouse.iterrows():
+        date = str(row["date"])[:10]
+        region = row["region"]
+        eid = row["eid"]
+
+        # Locate corresponding files
+        df_trials_file = [
+            f for f in os.listdir(BASE_DIR)
+            if f.startswith("df_trials_")
+            and subject in f
+            and date in f
+            and region in f
+            and eid in f
+        ]
+        df_nph_file = [
+            f for f in os.listdir(BASE_DIR)
+            if f.startswith("df_nph_")
+            and subject in f
+            and date in f
+            and region in f
+            and eid in f
+        ]
+
+        if not df_trials_file or not df_nph_file:
+            print(f"⚠️ Missing files for {subject} | {date} | {region} | {eid}")
+            continue
+
+        # Load
+        df_trials = pd.read_csv(os.path.join(BASE_DIR, df_trials_file[0]))
+        df_nph = pd.read_csv(os.path.join(BASE_DIR, df_nph_file[0]))
+
+        # Apply per-session offset so times are unique
+        df_nph["times"] += time_offset
+        for ev in ["stimOnTrigger_times", "feedback_times"]:
+            if ev in df_trials.columns:
+                df_trials[ev] += time_offset
+
+        # Update cumulative offset (+ small gap)
+        time_offset += df_nph["times"].iloc[-1] + 5
+
+        # Store with session identifier
+        df_trials["session_id"] = f"{date}_{region}_{eid}"
+        df_nph["session_id"] = f"{date}_{region}_{eid}"
+
+        all_trials.append(df_trials)
+        all_nph.append(df_nph)
+
+    # Skip if subject has no valid sessions
+    if not all_trials or not all_nph:
+        print(f"⚠️ No valid sessions found for {subject}")
+        continue
+
+    # Concatenate
+    df_trials_all = pd.concat(all_trials, ignore_index=True)
+    df_nph_all = pd.concat(all_nph, ignore_index=True)
+
+    print(f"📊 Combined df_trials_all shape: {df_trials_all.shape}")
+    print(f"📈 Combined df_nph_all shape: {df_nph_all.shape}")
+
+    # =========================================================
+    # Compute sampling frequency
+    # =========================================================
+    time_diffs = df_nph_all["times"].diff().dropna()
+    fs = 1 / time_diffs.median()
+    print(f"⏱ Sampling rate: {fs:.2f} Hz")
+
+    # =========================================================
+    # PLOT: 3 SUBPLOTS (stimOn, feedback correct, feedback incorrect)
+    # =========================================================
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+    titles = ["Stimulus Onset", "Feedback (Correct)", "Feedback (Incorrect)"]
+    conditions = [
+        {"event": "stimOnTrigger_times", "mask": np.ones(len(df_trials_all), dtype=bool)},
+        {"event": "feedback_times", "mask": df_trials_all["feedbackType"] == 1},
+        {"event": "feedback_times", "mask": df_trials_all["feedbackType"] != 1},
+    ]
+
+    for ax, title, cond in zip(axes, titles, conditions):
+        event = cond["event"]
+        mask_trials = cond["mask"]
+
+        contrasts = np.sort(df_trials_all["allSContrasts"].dropna().unique())
+
+        # Define colors: same hue for positive/negative, darker for stronger contrasts
+        max_contrast = np.max(np.abs(contrasts))
+        abs_contrasts = np.abs(contrasts)
+        # Normalize so 0 → light, 1 → dark
+        normed = abs_contrasts / max_contrast
+
+        # Use a perceptually uniform colormap (you can keep inferno_r if you like)
+        base_cmap = cm.get_cmap("inferno_r")
+
+        colors = []
+        for c in contrasts:
+            # Darker for larger |contrast|
+            intensity = 0.2 + 0.8 * (abs(c) / max_contrast)  # keeps some range
+            # Positive and negative get same hue
+            color = base_cmap(intensity)
+            colors.append(color)
+
+
+        for i, contrast in enumerate(contrasts):
+            mask_contrast = mask_trials & (df_trials_all["allSContrasts"] == contrast)
+
+            # Compute PSTH
+            photometry_event, idx_psth = psth(
+                calcium=df_nph_all["zdFF"].values,
+                times=df_nph_all["times"].values,
+                t_events=df_trials_all.loc[mask_contrast, event].values,
+                fs=fs,
+                peri_event_window=PERIEVENT_WINDOW
+            )
+
+            if photometry_event.size == 0:
+                continue
+
+            mean_trace = np.nanmean(photometry_event, axis=1)
+            sem_trace = np.nanstd(photometry_event, axis=1) / np.sqrt(photometry_event.shape[1])
+
+            n_timepoints = photometry_event.shape[0]
+            time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
+
+            ax.plot(time_axis, mean_trace, color=colors[i], lw=2.5, label=f"{contrast:.2f}")
+            ax.fill_between(time_axis,
+                            mean_trace - sem_trace,
+                            mean_trace + sem_trace,
+                            color=colors[i],
+                            alpha=0.25)
+
+        ax.axvline(0, color="black", linestyle="--")
+        ax.set_xlabel("Time (s)")
+        ax.set_title(title)
+
+    axes[0].set_ylabel("ΔF/F (z-scored)")
+    axes[0].legend(title="allContrasts", bbox_to_anchor=(1.05, 1), loc="upper left")
+
+    fig.suptitle(f"{subject} — Combined sessions — Mean ± SEM", fontsize=14, weight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.show()
+
