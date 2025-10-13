@@ -582,7 +582,7 @@ results = []
 
 # predictors you always use
 predictor_cols = [
-    "quiescenceTime","quiescencePeriod","stimSide","allContrasts",
+    "quiescenceTime","quiescencePeriod","stimSide","allSContrasts",
     "reactionTime","choice","feedbackType","prev_choice","prev_feedbackType"
 ]
 targets = ["quiescence_mean_zdFF", "stimOn_slope", "feedback_norm_mean"]
@@ -729,7 +729,7 @@ for i, row in df_good_BCW.iterrows():
 # %%
 # SAVE RESULTS
 df_results = pd.DataFrame(results)
-df_results.to_csv(os.path.join(BASE_DIR, f"ridge_results_allSessions_alpha{alpha}.csv"), index=False)
+df_results.to_csv(os.path.join(BASE_DIR, f"ridge_results_allSessions_alpha{alpha}_signed.csv"), index=False)
 
 # Plot distribution of R² per signal
 plt.figure(figsize=(7,4))
@@ -737,7 +737,7 @@ for t in targets:
     plt.hist(df_results[df_results["target"]==t]["r2"], bins=20, alpha=0.5, label=t)
 plt.xlabel("R²")
 plt.ylabel("Sessions")
-plt.title("Explained variance of neural signals by behavioral model (α=5)")
+plt.title(f"Explained variance of neural signals by behavioral model (α={alpha})")
 plt.legend()
 plt.tight_layout()
 plt.show()
@@ -908,3 +908,126 @@ plt.title("Ridge α tuning (fast cached version)")
 plt.grid(True, which="both", ls="--", alpha=0.4)
 plt.tight_layout()
 plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#%%
+# ==============================================================================
+# SPLIT BY NMS 
+# ==============================================================================
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# =========================================================
+# LOAD AND MAP NEUROMODULATORS
+# =========================================================
+df = pd.read_csv("/home/kceniabougrova/Downloads/good_sessions_outputs/ridge_results_allSessions_alpha1.0.csv")
+
+nm_map = {
+    # DA
+    "ZFM-03447": "DA", "ZFM-03448": "DA", "ZFM-03450": "DA",
+    "ZFM-04019": "DA", "ZFM-04022": "DA", "ZFM-04026": "DA",
+    # 5-HT
+    "ZFM-03061": "5-HT", "ZFM-03065": "5-HT", "ZFM-04392": "5-HT", 
+    'ZFM-03059': "5-HT", 'ZFM-03062': "5-HT",
+    'ZFM-05236': "5-HT", 'ZFM-05248': "5-HT", 'ZFM-05245': "5-HT", 'ZFM-05235': "5-HT",
+    # NE
+    "ZFM-06268": "NE", "ZFM-06271": "NE", "ZFM-06272": "NE",
+    "ZFM-06171": "NE", "ZFM-06275": "NE",
+    'ZFM-04533': "NE", 'ZFM-04534': "NE",
+    # ACh
+    "ZFM-06305": "ACh", "ZFM-06946": "ACh", "ZFM-06948": "ACh"
+}
+
+df["NM"] = df["subject"].map(nm_map)
+df = df.dropna(subset=["NM"])  # keep only mapped mice
+
+print(df["NM"].value_counts())
+
+# =========================================================
+# 1️⃣ SUMMARY BY NM AND TARGET
+# =========================================================
+summary = (
+    df.groupby(["NM", "target"])
+      .agg(mean_r2=("r2", "mean"),
+           std_r2=("r2", "std"),
+           mean_cv=("r2_cv_mean", "mean"),
+           std_cv=("r2_cv_mean", "std"))
+      .reset_index()
+)
+
+print(summary)
+
+# =========================================================
+# PLOT 1 — Mean R² per NM × target
+# =========================================================
+plt.figure(figsize=(8,5))
+sns.barplot(data=summary, x="NM", y="mean_r2", hue="target",
+            palette="Set2", capsize=.1, errwidth=1)
+plt.ylabel("Mean R² (ridge α=1)")
+plt.title("Explained variance per Neuromodulator and target")
+plt.legend(title="Target", bbox_to_anchor=(1.05, 1), loc="upper left")
+plt.tight_layout()
+plt.show()
+
+# =========================================================
+# 2️⃣ PLOT 2 — Cross-validated R² per NM × target
+# =========================================================
+plt.figure(figsize=(8,5))
+sns.barplot(data=summary, x="NM", y="mean_cv", hue="target",
+            palette="coolwarm", capsize=.1)
+plt.ylabel("Mean CV R²")
+plt.title("Cross-validated R² per Neuromodulator and target")
+plt.axhline(0, color='k', linestyle='--', lw=1)
+plt.legend(title="Target", bbox_to_anchor=(1.05, 1))
+plt.tight_layout()
+plt.show()
+
+# =========================================================
+# 3️⃣ PLOT 3 — Predictor weights per NM
+# =========================================================
+# melt weight columns (β_xxx)
+coef_cols = [c for c in df.columns if c.startswith("β_")]
+df_melt = df.melt(id_vars=["NM", "target"], value_vars=coef_cols,
+                  var_name="predictor", value_name="weight")
+df_melt["predictor"] = df_melt["predictor"].str.replace("β_", "")
+
+plt.figure(figsize=(10,5))
+sns.boxplot(data=df_melt, x="predictor", y="weight", hue="NM",
+            palette="Set3", showfliers=False)
+plt.xticks(rotation=45, ha="right")
+plt.axhline(0, color="k", linestyle="--", lw=1)
+plt.title("Predictor weights per Neuromodulator")
+plt.ylabel("Ridge β (α=1)")
+plt.tight_layout()
+plt.show()
+
+# %%
+""
