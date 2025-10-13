@@ -643,7 +643,7 @@ for i, row in df_good_BCW.iterrows():
     # -------- event windows
     df_int = pd.DataFrame({"trial_idx": df_trials.index})
     df_int["q_start"], df_int["q_end"] = df_trials["stimOnTrigger_times"]-0.4, df_trials["stimOnTrigger_times"]
-    df_int["s_start"], df_int["s_end"] = df_trials["stimOnTrigger_times"], df_trials["stimOnTrigger_times"]+0.1
+    df_int["s_start"], df_int["s_end"] = df_trials["stimOnTrigger_times"], df_trials["stimOnTrigger_times"]+0.15 #0.1 has nans (only 1 value within that interval or so)
     df_int["f_start"], df_int["f_end"] = df_trials["feedback_times"], df_trials["feedback_times"]+0.5
     df_int["f_bstart"], df_int["f_bend"] = df_trials["feedback_times"]-0.1, df_trials["feedback_times"]
 
@@ -661,7 +661,12 @@ for i, row in df_good_BCW.iterrows():
     df_summary["feedback_norm_mean"] = fb_resp - fb_base
 
     # -------- filter + derived predictors
-    df_pred = df_summary[(df_summary["probabilityLeft"]==0.5) & (df_summary["choice"]!=0)].copy()
+    # df_pred = df_summary[(df_summary["probabilityLeft"]==0.5) & (df_summary["choice"]!=0)].copy()
+    df_pred = df_summary[
+        (df_summary["probabilityLeft"] == 0.5)
+        & (df_summary["choice"] != 0)
+        & (df_summary["firstMovement_times"].notna())
+    ].copy()
     # compute stimSide then flip if fiber is in the list
     df_pred["stimSide"] = df_pred.apply(base_stim_side, axis=1)
     df_pred["stimSide"] = df_pred["stimSide"] * flip
