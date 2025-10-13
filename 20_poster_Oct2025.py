@@ -586,7 +586,7 @@ predictor_cols = [
     "reactionTime","choice","feedbackType","prev_choice","prev_feedbackType"
 ]
 targets = ["quiescence_mean_zdFF", "stimOn_slope", "feedback_norm_mean"]
-alpha = 5.0
+alpha = 1.0
 
 # -------------------------------------------------------------
 def extract_mean(df_nph, start_times, end_times):
@@ -729,7 +729,7 @@ for i, row in df_good_BCW.iterrows():
 # %%
 # SAVE RESULTS
 df_results = pd.DataFrame(results)
-df_results.to_csv(os.path.join(BASE_DIR, "ridge_results_allSessions.csv"), index=False)
+df_results.to_csv(os.path.join(BASE_DIR, f"ridge_results_allSessions_alpha{alpha}.csv"), index=False)
 
 # Plot distribution of R² per signal
 plt.figure(figsize=(7,4))
@@ -739,5 +739,172 @@ plt.xlabel("R²")
 plt.ylabel("Sessions")
 plt.title("Explained variance of neural signals by behavioral model (α=5)")
 plt.legend()
+plt.tight_layout()
+plt.show()
+
+# %%
+
+
+
+
+
+# %%
+# ===============================================================================
+# to choose alpha
+# ===============================================================================
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.linear_model import ridge_regression
+from sklearn.preprocessing import MaxAbsScaler
+from sklearn.metrics import r2_score
+
+BASE_DIR = "/home/kceniabougrova/Downloads/good_sessions_outputs/"
+df_good_BCW = pd.read_excel(os.path.join(BASE_DIR, "df_good_BCW.xlsx"))
+
+alphas = [0.1, 1, 5, 10, 50]
+
+targets = ["quiescence_mean_zdFF", "stimOn_slope", "feedback_norm_mean"]
+
+predictor_cols = [
+    "quiescenceTime", "quiescencePeriod", "stimSide", "allContrasts",
+    "reactionTime", "choice", "feedbackType", "prev_choice", "prev_feedbackType"
+]
+flip_fibers = {"probe09","probe12","probe16","probe19","probe24","probe28","probe31","probe33"}
+
+# =========================================================
+# Helper functions
+# =========================================================
+def extract_mean(df, s, e):
+    out = np.full(len(s), np.nan)
+    for i, (t0, t1) in enumerate(zip(s, e)):
+        mask = (df["times"] >= t0) & (df["times"] <= t1)
+        if mask.any():
+            out[i] = df.loc[mask, "zdFF"].mean()
+    return out
+
+def base_stim_side(r):
+    if pd.notna(r["contrastLeft"]) and pd.isna(r["contrastRight"]):
+        return -1
+    elif pd.notna(r["contrastRight"]) and pd.isna(r["contrastLeft"]):
+        return 1
+    else:
+        return np.nan
+
+# =========================================================
+# STEP 1 — Precompute all metrics once
+# =========================================================
+cached_sessions = []
+df_subset = df_good_BCW.sample(n=50, random_state=42)
+
+for i, row in df_subset.iterrows():
+    print(i,"==================================================================")
+    subject, date, region, eid, fiber = row["subject"], str(row["date"])[:10], row["region"], row["eid"], row["fiber"]
+
+    df_trials_file = [f for f in os.listdir(BASE_DIR)
+                      if f.startswith("df_trials_") and subject in f and date in f and region in f and eid in f]
+    df_nph_file = [f for f in os.listdir(BASE_DIR)
+                   if f.startswith("df_nph_") and subject in f and date in f and region in f and eid in f]
+    if not df_trials_file or not df_nph_file:
+        continue
+
+    df_trials = pd.read_csv(os.path.join(BASE_DIR, df_trials_file[0]))
+    df_nph = pd.read_csv(os.path.join(BASE_DIR, df_nph_file[0]))
+
+    # time intervals
+    stim = df_trials["stimOnTrigger_times"]
+    fb = df_trials["feedback_times"]
+
+    df_int = pd.DataFrame({
+        "q_start": stim - 0.4, "q_end": stim,
+        "s_start": stim, "s_end": stim + 0.1,
+        "f_start": fb, "f_end": fb + 0.5,
+        "f_bstart": fb - 0.1, "f_bend": fb
+    })
+    print("step2")
+    # compute zdFF metrics
+    q = extract_mean(df_nph, df_int["q_start"], df_int["q_end"])
+    s = np.full(len(stim), np.nan)
+    for j, (t0, t1) in enumerate(zip(df_int["s_start"], df_int["s_end"])):
+        seg = df_nph.loc[(df_nph["times"]>=t0)&(df_nph["times"]<=t1),"zdFF"].values
+        if len(seg) >= 2:
+            s[j] = (seg[-1]-seg[0])/(t1-t0)
+    fb_base = extract_mean(df_nph, df_int["f_bstart"], df_int["f_bend"])
+    fb_resp = extract_mean(df_nph, df_int["f_start"], df_int["f_end"])
+    f = fb_resp - fb_base
+
+    # create summary
+    df_summary = df_trials.copy()
+    df_summary["quiescence_mean_zdFF"] = q
+    df_summary["stimOn_slope"] = s
+    df_summary["feedback_norm_mean"] = f
+
+    cached_sessions.append((df_summary, fiber, subject, date, region))
+    print("end loop",i)
+print(f"✅ Cached {len(cached_sessions)} sessions")
+
+# =========================================================
+# STEP 2 — Loop over α values
+# =========================================================
+results_alpha = []
+
+for alpha in alphas:
+    r2_all = []
+    print(f"\n===== α = {alpha:.3f} =====")
+
+    for df_summary, fiber, subject, date, region in cached_sessions:
+        # filters
+        df_pred = df_summary[
+            (df_summary["probabilityLeft"]==0.5)
+            & (df_summary["choice"]!=0)
+            & (df_summary["firstMovement_times"].notna())
+        ].copy()
+
+        # stimSide + history
+        df_pred["stimSide"] = df_pred.apply(base_stim_side, axis=1)
+        df_pred["stimSide"] *= (-1 if fiber in flip_fibers else 1)
+        df_pred["prev_choice"] = df_pred["choice"].shift(1)
+        df_pred["prev_feedbackType"] = df_pred["feedbackType"].shift(1)
+        df_pred.dropna(subset=["stimSide","prev_choice","prev_feedbackType"], inplace=True)
+        df_pred.dropna(subset=predictor_cols, inplace=True)
+
+        # scaling
+        if len(df_pred) < 10:
+            continue
+        scaler = MaxAbsScaler()
+        df_pred[predictor_cols] = scaler.fit_transform(df_pred[predictor_cols])
+        X = df_pred[predictor_cols].to_numpy()
+
+        # loop through targets
+        print("entering another loop")
+        for t in targets:
+            y = df_pred[t].to_numpy()
+            mask = np.isfinite(y) & np.isfinite(X).all(axis=1)
+            Xc, yc = X[mask], y[mask]
+            if len(yc) < 10:
+                continue
+            coef = ridge_regression(Xc, yc, alpha=alpha)
+            y_pred = Xc @ coef
+            r2_all.append(r2_score(yc, y_pred))
+
+    mean_r2, std_r2 = np.mean(r2_all), np.std(r2_all)
+    print(f"✅ α={alpha:.3f}: mean R²={mean_r2:.3f} ± {std_r2:.3f}")
+    results_alpha.append({"alpha": alpha, "mean_r2": mean_r2, "std_r2": std_r2})
+
+# =========================================================
+# STEP 3 — Plot R² vs α
+# =========================================================
+df_alpha = pd.DataFrame(results_alpha)
+plt.figure(figsize=(6,4))
+plt.semilogx(df_alpha["alpha"], df_alpha["mean_r2"], "o-", color="royalblue")
+plt.fill_between(df_alpha["alpha"],
+                 df_alpha["mean_r2"] - df_alpha["std_r2"],
+                 df_alpha["mean_r2"] + df_alpha["std_r2"],
+                 color="royalblue", alpha=0.2)
+plt.xlabel("α (regularization strength)")
+plt.ylabel("Mean R² (across all sessions)")
+plt.title("Ridge α tuning (fast cached version)")
+plt.grid(True, which="both", ls="--", alpha=0.4)
 plt.tight_layout()
 plt.show()
