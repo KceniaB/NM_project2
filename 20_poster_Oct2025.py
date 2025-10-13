@@ -82,82 +82,82 @@ else:
     print(f"df_trials shape: {df_trials.shape}")
     print(f"df_nph shape: {df_nph.shape}")
 # %%
-# ========================================================
-# 2. i) Quiescence = StimOn - 400ms (no movement contamination)
-# ========================================================
-# %%
+# # ========================================================
+# # 2. i) Quiescence = StimOn - 400ms (no movement contamination)
+# # ========================================================
+# # %%
 
-# Sampling frequency (optional, for checking)
-dt = np.median(np.diff(df_nph["times"]))
-print(f"Estimated sampling rate: {1/dt:.1f} Hz")
+# # Sampling frequency (optional, for checking)
+# dt = np.median(np.diff(df_nph["times"]))
+# print(f"Estimated sampling rate: {1/dt:.1f} Hz")
 
-# Prepare output: a list of arrays (zdFF segments per trial)
-segments = []
+# # Prepare output: a list of arrays (zdFF segments per trial)
+# segments = []
 
-for i, row in df_trials.iterrows():
-    t0 = row["stimOnTrigger_times"] - 0.4  # 400 ms before
-    t1 = row["stimOnTrigger_times"]        # event time
+# for i, row in df_trials.iterrows():
+#     t0 = row["stimOnTrigger_times"] - 0.4  # 400 ms before
+#     t1 = row["stimOnTrigger_times"]        # event time
     
-    # Select zdFF samples between t0 and t1
-    mask = (df_nph["times"] >= t0) & (df_nph["times"] <= t1)
-    zdff_segment = df_nph.loc[mask, "zdFF"].values
+#     # Select zdFF samples between t0 and t1
+#     mask = (df_nph["times"] >= t0) & (df_nph["times"] <= t1)
+#     zdff_segment = df_nph.loc[mask, "zdFF"].values
     
-    segments.append(zdff_segment)
+#     segments.append(zdff_segment)
 
-# Optionally store in new DataFrame
-df_segments = pd.DataFrame({
-    "trial_idx": np.arange(len(df_trials)),
-    "stimOnTrigger_times": df_trials["stimOnTrigger_times"],
-    "zdFF_segment": segments
-})
+# # Optionally store in new DataFrame
+# df_segments = pd.DataFrame({
+#     "trial_idx": np.arange(len(df_trials)),
+#     "stimOnTrigger_times": df_trials["stimOnTrigger_times"],
+#     "zdFF_segment": segments
+# })
 
-print(df_segments.head())
-
-
-df_segments["mean_preStim_zdFF"] = df_segments["zdFF_segment"].apply(np.mean)
+# print(df_segments.head())
 
 
-# ========================================================
-# Visualize
-# Option 1
-from scipy.stats import sem
+# df_segments["mean_preStim_zdFF"] = df_segments["zdFF_segment"].apply(np.mean)
 
-# Interpolate all segments to the same time vector
-n_samples = int(window * fs)
-aligned = np.full((len(df_segments), n_samples), np.nan)
 
-for i, seg in enumerate(df_segments["zdFF_segment"]):
-    if len(seg) > 0:
-        seg_interp = np.interp(np.linspace(0, 1, n_samples),
-                               np.linspace(0, 1, len(seg)), seg)
-        aligned[i, :] = seg_interp
+# # ========================================================
+# # Visualize
+# # Option 1
+# from scipy.stats import sem
 
-# Compute mean and SEM
-mean_zdff = np.nanmean(aligned, axis=0)
-sem_zdff = sem(aligned, axis=0, nan_policy="omit")
+# # Interpolate all segments to the same time vector
+# n_samples = int(window * fs)
+# aligned = np.full((len(df_segments), n_samples), np.nan)
 
-# Plot
-plt.figure(figsize=(8, 5))
-plt.plot(-time_vector, mean_zdff, color="darkorange")
-plt.fill_between(-time_vector, mean_zdff - sem_zdff, mean_zdff + sem_zdff, alpha=0.3)
-plt.axvline(0, color="k", linestyle="--")
-plt.xlabel("Time (s)")
-plt.ylabel("zdFF (mean ± SEM)")
-plt.title("Average pre-stimulus zdFF across trials")
-plt.tight_layout()
-plt.show()
+# for i, seg in enumerate(df_segments["zdFF_segment"]):
+#     if len(seg) > 0:
+#         seg_interp = np.interp(np.linspace(0, 1, n_samples),
+#                                np.linspace(0, 1, len(seg)), seg)
+#         aligned[i, :] = seg_interp
 
-# Option 2
-plt.figure(figsize=(6, 6))
-plt.imshow(aligned, aspect="auto", extent=[-window, 0, 0, len(aligned)],
-           cmap="inferno", origin="lower")
-plt.axvline(0, color="w", linestyle="--")
-plt.xlabel("Time (s)")
-plt.ylabel("Trial")
-plt.title("zdFF activity before stimOn (heatmap)")
-plt.colorbar(label="zdFF")
-plt.tight_layout()
-plt.show()
+# # Compute mean and SEM
+# mean_zdff = np.nanmean(aligned, axis=0)
+# sem_zdff = sem(aligned, axis=0, nan_policy="omit")
+
+# # Plot
+# plt.figure(figsize=(8, 5))
+# plt.plot(-time_vector, mean_zdff, color="darkorange")
+# plt.fill_between(-time_vector, mean_zdff - sem_zdff, mean_zdff + sem_zdff, alpha=0.3)
+# plt.axvline(0, color="k", linestyle="--")
+# plt.xlabel("Time (s)")
+# plt.ylabel("zdFF (mean ± SEM)")
+# plt.title("Average pre-stimulus zdFF across trials")
+# plt.tight_layout()
+# plt.show()
+
+# # Option 2
+# plt.figure(figsize=(6, 6))
+# plt.imshow(aligned, aspect="auto", extent=[-window, 0, 0, len(aligned)],
+#            cmap="inferno", origin="lower")
+# plt.axvline(0, color="w", linestyle="--")
+# plt.xlabel("Time (s)")
+# plt.ylabel("Trial")
+# plt.title("zdFF activity before stimOn (heatmap)")
+# plt.colorbar(label="zdFF")
+# plt.tight_layout()
+# plt.show()
 
 # %%
 # ========================================================
@@ -257,7 +257,8 @@ plt.show()
 # ========================================================
 # 5 - Select/build the predictors
 # ========================================================
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, StandardScaler
+
 
 # =========================================================
     # 1. FILTER: unbiased & valid-choice trials
@@ -299,13 +300,31 @@ df_pred = df_pred.dropna(subset=["prev_choice", "prev_feedbackType"]).reset_inde
     # 3. RESCALING (0–1 range)
     # =========================================================
 
-scaler = MinMaxScaler()
+# scaler = MinMaxScaler()
 
-cols_to_rescale = ["quiescenceTime", "quiescencePeriod", "allContrasts", "reactionTime"]
-df_pred[cols_to_rescale] = scaler.fit_transform(df_pred[cols_to_rescale])
+# cols_to_rescale = ["quiescenceTime", "quiescencePeriod", "allContrasts", "reactionTime"]
+# df_pred[cols_to_rescale] = scaler.fit_transform(df_pred[cols_to_rescale])
 
 # how to rescale allSContrasts if needed
 # df_pred["allSContrasts_rescaled"] = 2 * (df_pred["allSContrasts"] - df_pred["allSContrasts"].min()) / (df_pred["allSContrasts"].max() - df_pred["allSContrasts"].min()) - 1
+
+    # =========================================================
+    # 3.B. RESCALING (0–1 for positive vars, ±1 for signed vars)
+    # =========================================================
+
+# # Positive-only features
+# cols_to_rescale_01 = ["quiescenceTime", "quiescencePeriod", "reactionTime"]
+# df_pred[cols_to_rescale_01] = MinMaxScaler().fit_transform(df_pred[cols_to_rescale_01])
+
+# Signed features (like contrast)
+# it was only allContrasts
+
+# Use MaxAbsScaler in all
+cols_to_rescale_pm1 = ["allContrasts", "quiescenceTime", "quiescencePeriod", "reactionTime"]
+df_pred[cols_to_rescale_pm1] = MaxAbsScaler().fit_transform(df_pred[cols_to_rescale_pm1])
+
+
+
 
 # =========================================================
     # 4. KEEP ONLY THE DESIRED COLUMNS
@@ -340,7 +359,7 @@ target = df_pred["feedback_norm_mean"]   # or "stimOn_slope", "quiescence_mean_z
     # 2. Create design matrix (X) and target (y)
     # =========================================================
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+# from sklearn.preprocessing import StandardScaler
 
 # Define predictors (your chosen behavioral variables)
 predictor_cols = [
@@ -359,8 +378,12 @@ X = df_predictors[predictor_cols].values
 y = target.values
 
 # Standardize predictors for better ridge behavior
-scaler = StandardScaler()
+# scaler = StandardScaler()
+# X_scaled = scaler.fit_transform(X)
+
+scaler = MaxAbsScaler()
 X_scaled = scaler.fit_transform(X)
+
 
 # =========================================================
     # 3. Fit Ridge regression model
@@ -397,7 +420,7 @@ plt.show()
 # =========================================================
     # 4. b) Plot Coefficients (Weights) 
     # =========================================================
-plt.figure(figsize=(8,4))
+plt.figure(figsize=(5,4))
 plt.bar(predictor_cols, coef, color="darkorange")
 plt.xticks(rotation=45, ha="right")
 plt.ylabel("Weight (β)")
@@ -426,3 +449,290 @@ for train_idx, test_idx in kf.split(X_scaled):
 print(f"Mean CV R² = {np.mean(r2_scores):.3f} ± {np.std(r2_scores):.3f}")
 
 # %%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#%%
+# %%
+# %%
+##############################################################################
+# RIDGE REGRESSION LOOP ACROSS SESSIONS
+##############################################################################
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MaxAbsScaler
+from sklearn.linear_model import ridge_regression
+from sklearn.model_selection import KFold
+from sklearn.metrics import r2_score
+
+BASE_DIR = "/home/kceniabougrova/Downloads/good_sessions_outputs/"
+df_good_BCW = pd.read_excel(os.path.join(BASE_DIR, "df_good_BCW.xlsx"))
+
+# containers
+results = []
+
+# predictors you always use
+predictor_cols = [
+    "quiescenceTime","quiescencePeriod","stimSide","allContrasts",
+    "reactionTime","choice","feedbackType","prev_choice","prev_feedbackType"
+]
+targets = ["quiescence_mean_zdFF", "stimOn_slope", "feedback_norm_mean"]
+alpha = 5.0
+
+# -------------------------------------------------------------
+def extract_mean(df_nph, start_times, end_times):
+    means = []
+    for t0, t1 in zip(start_times, end_times):
+        mask = (df_nph["times"] >= t0) & (df_nph["times"] <= t1)
+        means.append(df_nph.loc[mask, "zdFF"].mean())
+    return np.array(means)
+
+# -------------------------------------------------------------
+def get_stim_side(row):
+    if pd.notna(row["contrastLeft"]) and pd.isna(row["contrastRight"]):
+        return -1
+    elif pd.notna(row["contrastRight"]) and pd.isna(row["contrastLeft"]):
+        return 1
+    else:
+        return np.nan
+
+# -------------------------------------------------------------
+FLIP_FIBERS = {"probe09", "probe12", "probe16", "probe19", "probe24", "probe28", "probe31", "probe33"}
+
+# get current session fiber
+fiber = row["fiber"]
+flip = -1 if fiber in FLIP_FIBERS else 1
+
+def base_stim_side(row):
+    # Left-only present (right is NaN)  -> -1
+    if pd.notna(row["contrastLeft"]) and pd.isna(row["contrastRight"]):
+        return -1
+    # Right-only present (left is NaN)  -> +1
+    elif pd.notna(row["contrastRight"]) and pd.isna(row["contrastLeft"]):
+        return 1
+    # both present or both NaN -> ambiguous
+    else:
+        return np.nan
+
+# -------------------------------------------------------------
+for i, row in df_good_BCW.iterrows():
+    subject, date, region, eid, fiber = row["subject"], str(row["date"])[:10], row["region"], row["eid"], row['fiber']
+    print(f"\n📦 Session {i}: {subject} | {date} | {region} | {fiber}")
+
+    # -------- find matching files
+    df_trials_file = [f for f in os.listdir(BASE_DIR)
+                      if f.startswith("df_trials_") and subject in f and date in f and region in f and eid in f]
+    df_nph_file = [f for f in os.listdir(BASE_DIR)
+                   if f.startswith("df_nph_") and subject in f and date in f and region in f and eid in f]
+    if not df_trials_file or not df_nph_file:
+        print("⚠️ missing files, skipping.")
+        continue
+
+    df_trials = pd.read_csv(os.path.join(BASE_DIR, df_trials_file[0]))
+    df_nph = pd.read_csv(os.path.join(BASE_DIR, df_nph_file[0]))
+
+    # -------- event windows
+    df_int = pd.DataFrame({"trial_idx": df_trials.index})
+    df_int["q_start"], df_int["q_end"] = df_trials["stimOnTrigger_times"]-0.4, df_trials["stimOnTrigger_times"]
+    df_int["s_start"], df_int["s_end"] = df_trials["stimOnTrigger_times"], df_trials["stimOnTrigger_times"]+0.1
+    df_int["f_start"], df_int["f_end"] = df_trials["feedback_times"], df_trials["feedback_times"]+0.5
+    df_int["f_bstart"], df_int["f_bend"] = df_trials["feedback_times"]-0.1, df_trials["feedback_times"]
+
+    # -------- compute zdFF metrics
+    df_summary = df_trials.copy()
+    df_summary["quiescence_mean_zdFF"] = extract_mean(df_nph, df_int["q_start"], df_int["q_end"])
+    stim_slopes = []
+    for t0, t1 in zip(df_int["s_start"], df_int["s_end"]):
+        seg = df_nph.loc[(df_nph["times"]>=t0)&(df_nph["times"]<=t1),"zdFF"].values
+        slope = (seg[-1]-seg[0])/(t1-t0) if len(seg)>=2 else np.nan
+        stim_slopes.append(slope)
+    df_summary["stimOn_slope"] = stim_slopes
+    fb_base = extract_mean(df_nph, df_int["f_bstart"], df_int["f_bend"])
+    fb_resp = extract_mean(df_nph, df_int["f_start"], df_int["f_end"])
+    df_summary["feedback_norm_mean"] = fb_resp - fb_base
+
+    # -------- filter + derived predictors
+    df_pred = df_summary[(df_summary["probabilityLeft"]==0.5) & (df_summary["choice"]!=0)].copy()
+    # compute stimSide then flip if fiber is in the list
+    df_pred["stimSide"] = df_pred.apply(base_stim_side, axis=1)
+    df_pred["stimSide"] = df_pred["stimSide"] * flip
+    df_pred["prev_choice"] = df_pred["choice"].shift(1)
+    df_pred["prev_feedbackType"] = df_pred["feedbackType"].shift(1)
+    df_pred.dropna(subset=["prev_choice","prev_feedbackType","stimSide"], inplace=True)
+
+    # -------- scale predictors
+    scaler = MaxAbsScaler()
+    df_pred[predictor_cols] = scaler.fit_transform(df_pred[predictor_cols])
+
+    X = df_pred[predictor_cols].values
+
+    # -------- loop over the 3 neural targets
+    for target_name in targets:
+        y = df_pred[target_name].values
+        if np.all(np.isnan(y)):
+            continue
+
+        # Fit ridge
+        coef = ridge_regression(X, y, alpha=alpha)
+        y_pred = X @ coef
+        r2 = r2_score(y, y_pred)
+
+        # CV R²
+        kf = KFold(n_splits=5, shuffle=True, random_state=42)
+        r2_cv = []
+        for tr, ts in kf.split(X):
+            coef_cv = ridge_regression(X[tr], y[tr], alpha=alpha)
+            y_pred_cv = X[ts] @ coef_cv
+            r2_cv.append(r2_score(y[ts], y_pred_cv))
+        mean_cv, std_cv = np.mean(r2_cv), np.std(r2_cv)
+
+        print(f"   {target_name}: R²={r2:.3f}, CV={mean_cv:.3f}±{std_cv:.3f}")
+
+        # store
+        results.append({
+            "session_idx": i,
+            "subject": subject,
+            "date": date,
+            "region": region,
+            "fiber": fiber, 
+            "target": target_name,
+            "r2": r2,
+            "r2_cv_mean": mean_cv,
+            "r2_cv_std": std_cv,
+            **{f"β_{col}": b for col,b in zip(predictor_cols, coef)}
+        })
+
+        # plot weights for each session
+        plt.figure(figsize=(5,4))
+        plt.bar(predictor_cols, coef, color="darkorange")
+        plt.xticks(rotation=45, ha="right")
+        plt.axhline(0, color="k", linestyle="--")
+        plt.ylabel("Weight (β)")
+        plt.title(f"{target_name} — {subject} {date} {fiber} ({region})\nR²={r2:.2f}, CV={mean_cv:.2f}")
+        plt.tight_layout()
+        plt.show()
+
+# %%
+# SAVE RESULTS
+df_results = pd.DataFrame(results)
+df_results.to_csv(os.path.join(BASE_DIR, "ridge_results_allSessions.csv"), index=False)
+
+# Plot distribution of R² per signal
+plt.figure(figsize=(7,4))
+for t in targets:
+    plt.hist(df_results[df_results["target"]==t]["r2"], bins=20, alpha=0.5, label=t)
+plt.xlabel("R²")
+plt.ylabel("Sessions")
+plt.title("Explained variance of neural signals by behavioral model (α=5)")
+plt.legend()
+plt.tight_layout()
+plt.show()
