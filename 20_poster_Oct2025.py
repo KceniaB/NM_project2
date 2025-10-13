@@ -948,7 +948,9 @@ import seaborn as sns
 # =========================================================
 # LOAD AND MAP NEUROMODULATORS
 # =========================================================
-df = pd.read_csv("/home/kceniabougrova/Downloads/good_sessions_outputs/ridge_results_allSessions_alpha1.0.csv")
+# df = pd.read_csv("/home/kceniabougrova/Downloads/good_sessions_outputs/ridge_results_allSessions_alpha1.0.csv")
+# df = pd.read_csv("/home/kceniabougrova/Downloads/good_sessions_outputs/ridge_results_allSessions_alpha1.0_unsigned_noTimeVars.csv")
+df = pd.read_csv("/home/kceniabougrova/Downloads/good_sessions_outputs/regression_results_allSessions_alpha1.0_unsigned_noTimeVars.csv") 
 
 nm_map = {
     # DA
@@ -1010,8 +1012,18 @@ plt.legend(title="Target", bbox_to_anchor=(1.05, 1))
 plt.tight_layout()
 plt.show()
 
+
 # =========================================================
-# 3️⃣ PLOT 3 — Predictor weights per NM
+# Define your custom palette
+nm_colors = {
+    "DA": "#BC1717",        # strong red
+    "5-HT": "#7855F9",      # dark slate/purple
+    "NE": "#4984F3",        # cornflower blue
+    "ACh": "#167D16"        # forest green (deep, not neon)
+}
+
+# =========================================================
+# 3️⃣ PLOT 3A — Predictor weights per NM
 # =========================================================
 # melt weight columns (β_xxx)
 coef_cols = [c for c in df.columns if c.startswith("β_")]
@@ -1028,6 +1040,22 @@ plt.title("Predictor weights per Neuromodulator")
 plt.ylabel("Ridge β (α=1)")
 plt.tight_layout()
 plt.show()
+
+# =========================================================
+# 4️⃣ PLOT 3B — Predictor weights per NM and target
+# =========================================================
+for target_name in ["quiescence_mean_zdFF", "stimOn_slope", "feedback_norm_mean"]:
+    subset = df[df["target"] == target_name]
+    plt.figure(figsize=(10,5))
+    sns.boxplot(
+        data=subset.melt(id_vars=["NM"], value_vars=[c for c in subset.columns if c.startswith("β_")]),
+        x="variable", y="value", hue="NM", palette=nm_colors
+    )
+    plt.title(f"Predictor weights for {target_name}")
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    plt.show()
+
 
 # %%
 ""
