@@ -1,12 +1,12 @@
 # NM_project2
 Copy from NM_project | cleaned | working from new PC
 
-* 00_movefiles_changefilename.py
+## 1. 00_movefiles_changefilename.py
   - move files to corresponding date folders
 
 
 
-* 01_get_behavior_and_photometry.py
+## 2. 01_get_behavior_and_photometry.py
   - pick data from list:
     - KB_sessions_insertions_map - upload.csv
     - KB_sessions_insertions_map - sessions_table(1).csv
@@ -36,5 +36,13 @@ Copy from NM_project | cleaned | working from new PC
     - allUContrasts
     - reactionTime
    
-  TO DO:
+  ### TO DO:
   - [optional] add other signal preprocessing methods - to compare
+
+
+
+## 3. 20_poster_Oct2025.py
+`📶 Use regressors to investigate which variables better explain the NM signal variability`
+ - pick data from list:
+    - KB_sessions_insertions_map - upload.csv
+    - KB_sessions_insertions_map - sessions_table(1).csv
