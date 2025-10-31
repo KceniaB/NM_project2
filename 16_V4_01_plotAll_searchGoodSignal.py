@@ -38,17 +38,10 @@ new_prefix = '/media/kceniabougrova/Seagate Basic/IBL_server_PC_20250529/kb/'
 
 
 #%% 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 # =========================================================
 # CONFIG
 # =========================================================
 PLOT = True
-old_prefix = '/mnt/h0/kb/'
-new_prefix = '/media/kceniabougrova/Seagate Basic/IBL_server_PC_20250529/kb/'
 
 processed_sessions = []
 error_sessions_processing = []
