@@ -4,6 +4,8 @@ KB
 16_V3_redoing.py_OCT062025_predictNMshape.py
 30-October-2025
 
+DONE
+
 Runs through the selected rows from the csv file of all the photometry sessions
 Check the plots and manually label the ones with a good signal 
 """
