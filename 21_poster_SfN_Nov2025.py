@@ -4,14 +4,7 @@
 # ----------------------
 
 """ 
-Step by step
-A. try with 1 session first 
-    1. Load the data for 1 session: 
-        df_trials and 1 df_nph
-            only BCW sessions 
-    2. Divide the trial of each session into 3: 
-        i) Quiescence = StimOn - 400ms (no movement contamination) 
-        ii) StimOn = 
+copy from 20_..._.py
 """
 
 #%%
