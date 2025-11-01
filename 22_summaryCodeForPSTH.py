@@ -386,6 +386,20 @@ nph = df_nph
 # df_nph.to_csv(save_nph_path, index=False)
 # print(f"💾 Saved df_nph -> {save_nph_path}")
 
+
+
+
+
+
+
+#%% 
+"""
+# =========================================================================================
+At this moment you should have df_nph and df_trials loaded and preprocessed, ready to plot
+Important columns in df_nph: 'times', 'zdFF'
+Times are already in the same clock
+# =========================================================================================
+"""
 #%%
 # =========================================================
 #  PSTH plot (Peri-feedback activity)
@@ -424,12 +438,12 @@ if PLOT:
         time_axis = np.linspace(PERIEVENT_WINDOW[0], PERIEVENT_WINDOW[1], n_timepoints)
 
         # --- Plot trial-wise and mean traces
-        plt.figure(figsize=(8, 6))
+        plt.figure(figsize=(8, 6), dpi=300)
         mask_correct = df_trials.feedbackType.values == 1
         mask_incorrect = ~mask_correct
 
         # Plot all trials (optional)
-        plt.plot(time_axis, photometry_feedback[:, mask_correct], color='blue', alpha=0.1, linewidth=0.5)
+        plt.plot(time_axis, photometry_feedback[:, mask_correct], color='#0077b6', alpha=0.1, linewidth=0.5)
         plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='red', alpha=0.1, linewidth=0.5)
 
         # Mean ± SEM
@@ -438,14 +452,14 @@ if PLOT:
         sem_correct = np.nanstd(photometry_feedback[:, mask_correct], axis=1) / np.sqrt(mask_correct.sum())
         sem_incorrect = np.nanstd(photometry_feedback[:, mask_incorrect], axis=1) / np.sqrt(mask_incorrect.sum())
 
-        plt.plot(time_axis, mean_correct, color='blue', linewidth=2, label='Correct')
+        plt.plot(time_axis, mean_correct, color='#0077b6', linewidth=2.5, label='Correct')
         plt.fill_between(time_axis, mean_correct - sem_correct, mean_correct + sem_correct,
-                        color='blue', alpha=0.3)
-        plt.plot(time_axis, mean_incorrect, color='red', linewidth=2, label='Incorrect')
+                        color='#0077b6', alpha=0.3)
+        plt.plot(time_axis, mean_incorrect, color='red', linewidth=2.5, label='Incorrect')
         plt.fill_between(time_axis, mean_incorrect - sem_incorrect, mean_incorrect + sem_incorrect,
                         color='red', alpha=0.3)
 
-        plt.axvline(x=0, color='black', linestyle='--', linewidth=1)
+        plt.axvline(x=0, color='black', linestyle='--', linewidth=2)
         plt.title(f"{i} - PSTH peri-{EVENT} — {subject} {region} {date}")
         plt.xlabel("Time (s)")
         plt.ylabel("ΔF/F (z-scored)")
@@ -457,6 +471,9 @@ if PLOT:
         # plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         # print(f"🖼️  Saved plot -> {plot_path}")
 
+        ax = plt.gca()
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
         plt.show(block=False)
         plt.pause(0.1)  # ensures plot shows before next loop iteration
 
