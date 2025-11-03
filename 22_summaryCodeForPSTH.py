@@ -402,7 +402,7 @@ Times are already in the same clock
 """
 #%%
 # =========================================================
-#  PSTH plot (Peri-feedback activity)
+#  1. PSTH plot (Peri-feedback activity)
 # =========================================================
 PLOT = True 
 
@@ -479,6 +479,547 @@ if PLOT:
 
     except Exception as e:
         print(f"⚠️ Could not plot PSTH for {subject} {date} {region}: {e}")
+
+
+
+# %% 
+# ==============================================================
+#  2. PSTH plot - function and different variations of the plot
+#
+# PSTH for stimOn and feedback events, split by correct and incorrect
+#
+# variables to change: 
+#   EVENT = "stimOnTrigger_times" or "feedback_times"
+#   time_window = (-1, 2)
+#   ylim = (-2, 3)
+#   save_path = ... 
+# ============================================================== 
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_psth(df_nph, df_trials, subject, region, date, i=None,
+              event="feedback_times", time_window=(-1, 2),
+              ylim=(-2, 3), save_path=None, show=True):
+    """
+    Plot peri-event photometry PSTH aligned to behavioral events.
+
+    Parameters
+    ----------
+    df_nph :
+        Photometry dataframe containing columns ['times', 'zdFF'].
+    df_trials : 
+        Behavioral dataframe containing event timestamps and 'feedbackType'.
+    subject
+    region 
+    date
+        Session date (YYYY-MM-DD).
+    i 
+    event : 
+        Event column to align to ('stimOnTrigger_times' or 'feedback_times').
+    time_window : default (-1, 2)
+        Time window (seconds before and after event).
+    ylim : default (-2, 3)
+    save_path
+    show
+    ----------
+    """
+
+    try:
+        # --- Parameters
+        SAMPLING_RATE = int(1 / np.mean(np.diff(df_nph.times)))
+        t = df_nph["times"].values
+        calcium = df_nph["zdFF"].values
+        t_events = df_trials[event].dropna().values
+        n_trials = len(t_events)
+        samples_window = np.arange(time_window[0] * SAMPLING_RATE,
+                                   time_window[1] * SAMPLING_RATE)
+        psth_idx = np.tile(samples_window[:, np.newaxis], (1, n_trials))
+        event_idx = np.searchsorted(t, t_events)
+        psth_idx += event_idx
+
+        # Mask invalid indices
+        psth_idx = psth_idx[(psth_idx >= 0) & (psth_idx < len(t))].reshape(-1, n_trials)
+
+        # Compute PSTH
+        photometry_feedback = calcium[psth_idx]
+
+        # Build time axis
+        n_timepoints = photometry_feedback.shape[0]
+        time_axis = np.linspace(time_window[0], time_window[1], n_timepoints)
+
+        # --- Plot trial-wise and mean traces
+        plt.figure(figsize=(8, 6), dpi=300)
+        mask_correct = df_trials.feedbackType.values == 1
+        mask_incorrect = ~mask_correct
+
+        # All trials
+        plt.plot(time_axis, photometry_feedback[:, mask_correct], color='#0077b6', alpha=0.1, linewidth=0.5)
+        plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='red', alpha=0.1, linewidth=0.5)
+
+        # Mean ± SEM
+        mean_correct = np.nanmean(photometry_feedback[:, mask_correct], axis=1)
+        mean_incorrect = np.nanmean(photometry_feedback[:, mask_incorrect], axis=1)
+        sem_correct = np.nanstd(photometry_feedback[:, mask_correct], axis=1) / np.sqrt(mask_correct.sum())
+        sem_incorrect = np.nanstd(photometry_feedback[:, mask_incorrect], axis=1) / np.sqrt(mask_incorrect.sum())
+
+        plt.plot(time_axis, mean_correct, color='#0077b6', linewidth=2.5, label='Correct')
+        plt.fill_between(time_axis, mean_correct - sem_correct, mean_correct + sem_correct,
+                         color='#0077b6', alpha=0.3)
+        plt.plot(time_axis, mean_incorrect, color='red', linewidth=2.5, label='Incorrect')
+        plt.fill_between(time_axis, mean_incorrect - sem_incorrect, mean_incorrect + sem_incorrect,
+                         color='red', alpha=0.3)
+
+        plt.axvline(x=0, color='black', linestyle='--', linewidth=2)
+        plt.title(f"{i if i is not None else ''} PSTH peri-{event} — {subject} {region} {date}")
+        plt.xlabel("Time (s)")
+        plt.ylabel("ΔF/F (z-scored)")
+        plt.legend(frameon=False)
+        plt.ylim(ylim)
+        plt.tight_layout()
+
+        # Clean style
+        ax = plt.gca()
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        # Save / Show
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"🖼️ Saved plot -> {save_path}")
+
+            # Also save a PDF version automatically
+            base, ext = os.path.splitext(save_path)
+            pdf_path = base + ".pdf"
+            plt.savefig(pdf_path, dpi=300, bbox_inches='tight')
+            print(f"📄 Saved plot -> {pdf_path}")
+
+
+        if show:
+            plt.show(block=False)
+            plt.pause(0.1)
+        else:
+            plt.close()
+
+        return time_axis, photometry_feedback
+
+    except Exception as e:
+        print(f"⚠️ Could not plot PSTH for {subject} {date} {region}: {e}")
+        return None, None
+    
+for EVENT in ["stimOnTrigger_times", "feedback_times"]: 
+    plot_psth(df_nph, df_trials, subject, region, date, i=i,
+                event=EVENT, time_window=(-1, 2),
+                ylim=(-2, 3), 
+                save_path="/home/kceniabougrova/Documents/2025_10_31_POSTER_SfN/01_psth_DA_example/psth_example_DA_1session.png", 
+                show=True)
+
+
+# %%
+import numpy as np
+import matplotlib.pyplot as plt
+
+def compute_psth(df_nph, df_trials, event, time_window=(-1, 2)):
+    """Return peri-event aligned zdFF and time axis."""
+    SAMPLING_RATE = int(1 / np.mean(np.diff(df_nph.times)))
+    t = df_nph["times"].values
+    calcium = df_nph["zdFF"].values
+    t_events = df_trials[event].dropna().values
+
+    n_trials = len(t_events)
+    samples_window = np.arange(time_window[0]*SAMPLING_RATE, time_window[1]*SAMPLING_RATE)
+    psth_idx = np.tile(samples_window[:, None], (1, n_trials))
+    event_idx = np.searchsorted(t, t_events)
+    psth_idx += event_idx
+    psth_idx = psth_idx[(psth_idx >= 0) & (psth_idx < len(t))].reshape(-1, n_trials)
+
+    photometry = calcium[psth_idx]
+    time_axis = np.linspace(time_window[0], time_window[1], photometry.shape[0])
+    return time_axis, photometry
+
+
+def plot_psth_grid(df_nph, df_trials, subject, region, date,
+                   events=None, time_window=(-1, 2), ylim=(-2,3)):
+    """
+    Create 5x5 grid:
+    Rows = trial groupings, Cols = events
+    """
+    if events is None:
+        events = ["intervals_0", "stimOnTrigger_times", "firstMovement_times", "feedback_times", "intervals_1"]
+
+    fig, axes = plt.subplots(5, 5, figsize=(20, 18), dpi=300, sharex=True, sharey=True)
+    plt.subplots_adjust(wspace=0.25, hspace=0.35)
+
+    mask_correct = df_trials.feedbackType.values == 1
+    mask_incorrect = ~mask_correct
+    contrasts = np.sort(df_trials.signed_contrast.unique()) if "signed_contrast" in df_trials.columns else []
+    probs = np.sort(df_trials.probabilityLeft.unique()) if "probabilityLeft" in df_trials.columns else []
+
+    for col, event in enumerate(events):
+        time_axis, psth = compute_psth(df_nph, df_trials, event, time_window)
+
+        # 1️⃣ Row 1: all correct vs incorrect
+        ax = axes[0, col]
+        mean_c = np.nanmean(psth[:, mask_correct], axis=1)
+        mean_i = np.nanmean(psth[:, mask_incorrect], axis=1)
+        ax.plot(time_axis, mean_c, color="#0077b6", lw=2.5)
+        ax.plot(time_axis, mean_i, color="red", lw=2.5)
+        ax.axvline(0, color="black", ls="--", lw=1)
+        ax.set_title(event.replace("_times", ""), fontsize=10)
+
+        # 2️⃣ Row 2: correct by contrast
+        ax = axes[1, col]
+        if len(contrasts) > 0:
+            for c in contrasts:
+                m = mask_correct & (df_trials.signed_contrast == c)
+                if m.sum() < 5: continue
+                ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), label=f"{c}")
+            ax.legend(frameon=False, fontsize=6)
+
+        # 3️⃣ Row 3: incorrect by contrast
+        ax = axes[2, col]
+        if len(contrasts) > 0:
+            for c in contrasts:
+                m = mask_incorrect & (df_trials.signed_contrast == c)
+                if m.sum() < 5: continue
+                ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), label=f"{c}")
+            ax.legend(frameon=False, fontsize=6)
+
+        # 4️⃣ Row 4: correct by probabilityLeft
+        ax = axes[3, col]
+        if len(probs) > 0:
+            for p in probs:
+                m = mask_correct & (df_trials.probabilityLeft == p)
+                if m.sum() < 5: continue
+                ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), label=f"pL={p}")
+            ax.legend(frameon=False, fontsize=6)
+
+        # 5️⃣ Row 5: incorrect by probabilityLeft
+        ax = axes[4, col]
+        if len(probs) > 0:
+            for p in probs:
+                m = mask_incorrect & (df_trials.probabilityLeft == p)
+                if m.sum() < 5: continue
+                ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), label=f"pL={p}")
+            ax.legend(frameon=False, fontsize=6)
+
+    # Common labels and cosmetics
+    for ax in axes.flat:
+        ax.axhline(0, color="gray", ls="--", lw=0.5)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_ylim(ylim)
+
+    for r, label in enumerate([
+        "Correct vs Incorrect",
+        "Correct by Contrast",
+        "Incorrect by Contrast",
+        "Correct by pLeft",
+        "Incorrect by pLeft"
+    ]):
+        axes[r,0].set_ylabel(label, fontsize=9)
+
+    fig.suptitle(f"{subject} – {region} – {date} PSTH Grid", fontsize=14, weight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.show()
+
+# %%
+plot_psth_grid(df_nph, df_trials,
+               subject="ZFM-04019",
+               region="DR",
+               date="2023-07-15")
+
+# %%
+# ==============================================================
+# 3. Plot a grid 5x5 
+        # Columns (5):
+            # intervals_0
+            # stimOnTrigger_times
+            # firstMovement_times
+            # feedback_times
+            # intervals_1
+
+        # Rows (5):
+            # Correct vs Incorrect (all trials)
+            # Correct split by all contrasts
+            # Incorrect split by all contrasts
+            # Correct split by probabilityLeft
+            # Incorrect split by probabilityLeft
+# ==============================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm, colors
+
+# =========================================================
+# COMPUTE PSTH FUNCTION
+# =========================================================
+def compute_psth(df_nph, df_trials, event, time_window=(-1, 2)):
+    """Return peri-event aligned zdFF, time axis, and valid trial indices."""
+    if event not in df_trials.columns:
+        print(f"⚠️ Event '{event}' not in df_trials.columns — skipped.")
+        return None, None, None
+
+    t_events = df_trials[event].dropna().values
+    if len(t_events) == 0:
+        print(f"⚠️ No valid timestamps for event '{event}' — skipped.")
+        return None, None, None
+
+    SAMPLING_RATE = int(1 / np.mean(np.diff(df_nph.times)))
+    t = df_nph["times"].values
+    calcium = df_nph["zdFF"].values
+
+    n_trials = len(t_events)
+    samples_window = np.arange(time_window[0]*SAMPLING_RATE, time_window[1]*SAMPLING_RATE)
+    psth_idx = np.tile(samples_window[:, None], (1, n_trials))
+    event_idx = np.searchsorted(t, t_events)
+    psth_idx += event_idx
+
+    # Mask invalid trials (events too close to signal edges)
+    valid_trials = (psth_idx.min(axis=0) >= 0) & (psth_idx.max(axis=0) < len(t))
+    if not np.all(valid_trials):
+        bad_idx = np.where(~valid_trials)[0]
+        for b in bad_idx:
+            print(f"⚠️ Skipped trial #{b} for event '{event}' (out of bounds)")
+        psth_idx = psth_idx[:, valid_trials]
+
+    if psth_idx.size == 0:
+        print(f"⚠️ Empty PSTH for event '{event}' — skipped.")
+        return None, None, None
+
+    photometry = calcium[psth_idx]
+    time_axis = np.linspace(time_window[0], time_window[1], photometry.shape[0])
+
+    kept_trials = np.where(df_trials[event].notna())[0][valid_trials]
+    return time_axis, photometry, kept_trials
+
+
+# =========================================================
+# 5×5 GRID PLOTTING FUNCTION
+# =========================================================
+def plot_psth_grid(df_nph, df_trials, subject, region, date,
+                   events=None, time_window=(-1, 2), ylim=(-2,3)):
+    """
+    Create 5x5 PSTH grid:
+    Rows = trial groupings (Correct/Incorrect, contrasts, probabilities)
+    Cols = behavioral events
+    """
+    if events is None:
+        events = ["intervals_0", "stimOnTrigger_times", "firstMovement_times", "feedback_times", "intervals_1"]
+
+    fig, axes = plt.subplots(5, 5, figsize=(20, 18), dpi=300, sharex=True, sharey=True)
+    plt.subplots_adjust(wspace=0.25, hspace=0.35)
+
+    # Extract unique values if available
+    contrasts = np.sort(df_trials.allContrasts.unique()) if "allContrasts" in df_trials.columns else []
+    probs = np.sort(df_trials.probabilityLeft.unique()) if "probabilityLeft" in df_trials.columns else []
+
+    # Generate gradient colormap for contrasts
+    if len(contrasts) > 0:
+        cmap = cm.get_cmap("inferno_r", len(contrasts))
+        contrast_colors = [colors.to_hex(cmap(i)) for i in range(len(contrasts))]
+    else:
+        contrast_colors = []
+
+    for col, event in enumerate(events):
+        time_axis, psth, kept = compute_psth(df_nph, df_trials, event, time_window)
+        if psth is None:
+            for row in range(5):
+                axes[row, col].set_axis_off()
+            continue
+
+        # Adjust trial-level masks for surviving trials only
+        mask_correct = df_trials.feedbackType.values[kept] == 1
+        mask_incorrect = ~mask_correct
+
+        # # 1️⃣ Row 1: all correct vs incorrect
+        # ax = axes[0, col]
+        # try:
+        #     mean_c = np.nanmean(psth[:, mask_correct], axis=1)
+        #     mean_i = np.nanmean(psth[:, mask_incorrect], axis=1)
+        #     ax.plot(time_axis, mean_c, color="#0077b6", lw=2.5)
+        #     ax.plot(time_axis, mean_i, color="red", lw=2.5)
+        # except Exception as e:
+        #     print(f"⚠️ Could not plot Correct/Incorrect for event '{event}': {e}")
+        #     ax.set_axis_off()
+        # ax.axvline(0, color="black", ls="--", lw=1)
+        # ax.set_title(event.replace("_times", ""), fontsize=10)
+
+        # 1️⃣ Row 1: all correct vs incorrect
+        ax = axes[0, col]
+        try:
+            mean_c = np.nanmean(psth[:, mask_correct], axis=1)
+            sem_c = np.nanstd(psth[:, mask_correct], axis=1) / np.sqrt(mask_correct.sum())
+            mean_i = np.nanmean(psth[:, mask_incorrect], axis=1)
+            sem_i = np.nanstd(psth[:, mask_incorrect], axis=1) / np.sqrt(mask_incorrect.sum())
+
+            ax.plot(time_axis, mean_c, color="#0077b6", lw=2.5)
+            ax.fill_between(time_axis, mean_c - sem_c, mean_c + sem_c, color="#0077b6", alpha=0.3)
+            ax.plot(time_axis, mean_i, color="red", lw=2.5)
+            ax.fill_between(time_axis, mean_i - sem_i, mean_i + sem_i, color="red", alpha=0.3)
+
+        except Exception as e:
+            print(f"⚠️ Could not plot Correct/Incorrect for event '{event}': {e}")
+            ax.set_axis_off()
+        ax.legend(frameon=False, fontsize=6, loc="upper right")
+        ax.axvline(0, color="black", ls="--", lw=1)
+        ax.set_title(event.replace("_times", ""), fontsize=10)
+
+
+        # # 2️⃣ Row 2: correct by contrast
+        # ax = axes[1, col]
+        # if len(contrasts) > 0:
+        #     for c_idx, c in enumerate(contrasts):
+        #         m = mask_correct & (df_trials.allContrasts.values[kept] == c)
+        #         if m.sum() < 5: 
+        #             continue
+        #         ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), color=contrast_colors[c_idx], lw=2.0, label=f"{c}")
+        #     if ax.has_data():
+        #         ax.legend(frameon=False, fontsize=6, title="Contrast")
+        #     else:
+        #         print(f"⚠️ No valid Correct-by-Contrast data for event '{event}'")
+
+        # 2️⃣ Row 2: correct by contrast
+        ax = axes[1, col]
+        if len(contrasts) > 0:
+            for c_idx, c in enumerate(contrasts):
+                m = mask_correct & (df_trials.allContrasts.values[kept] == c)
+                if m.sum() < 5: 
+                    continue
+                y = np.nanmean(psth[:, m], axis=1)
+                sem = np.nanstd(psth[:, m], axis=1) / np.sqrt(m.sum())
+                ax.plot(time_axis, y, color=contrast_colors[c_idx], lw=2.0, label=f"{c}")
+                ax.fill_between(time_axis, y - sem, y + sem, color=contrast_colors[c_idx], alpha=0.3)
+            ax.axvline(0, color="black", ls="--", lw=1)
+            if ax.has_data():
+                ax.legend(frameon=False, fontsize=6, title="Contrast")
+
+
+        # # 3️⃣ Row 3: incorrect by contrast
+        # ax = axes[2, col]
+        # if len(contrasts) > 0:
+        #     for c_idx, c in enumerate(contrasts):
+        #         m = mask_incorrect & (df_trials.allContrasts.values[kept] == c)
+        #         if m.sum() < 5:
+        #             continue
+        #         ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), color=contrast_colors[c_idx], lw=2.0, label=f"{c}")
+        #     if ax.has_data():
+        #         ax.legend(frameon=False, fontsize=6, title="Contrast")
+        #     else:
+        #         print(f"⚠️ No valid Incorrect-by-Contrast data for event '{event}'") 
+
+        # 3️⃣ Row 3: incorrect by contrast
+        ax = axes[2, col]
+        if len(contrasts) > 0:
+            for c_idx, c in enumerate(contrasts):
+                m = mask_incorrect & (df_trials.allContrasts.values[kept] == c)
+                if m.sum() < 5:
+                    continue
+                y = np.nanmean(psth[:, m], axis=1)
+                sem = np.nanstd(psth[:, m], axis=1) / np.sqrt(m.sum())
+                ax.plot(time_axis, y, color=contrast_colors[c_idx], lw=2.0, label=f"{c}")
+                ax.fill_between(time_axis, y - sem, y + sem, color=contrast_colors[c_idx], alpha=0.3)
+            ax.axvline(0, color="black", ls="--", lw=1)
+            if ax.has_data():
+                ax.legend(frameon=False, fontsize=6, title="Contrast")
+
+
+        # # 4️⃣ Row 4: correct by probabilityLeft
+        # ax = axes[3, col]
+        # if len(probs) > 0:
+        #     for p in probs:
+        #         m = mask_correct & (df_trials.probabilityLeft.values[kept] == p)
+        #         if m.sum() < 5: continue
+        #         ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), lw=2.0, label=f"pL={p}")
+        #     if ax.has_data():
+        #         ax.legend(frameon=False, fontsize=6)
+        #     else:
+        #         print(f"⚠️ No valid Correct-by-pLeft data for event '{event}'") 
+
+        # 4️⃣ Row 4: correct by probabilityLeft
+        ax = axes[3, col]
+        if len(probs) > 0:
+            for p in probs:
+                m = mask_correct & (df_trials.probabilityLeft.values[kept] == p)
+                if m.sum() < 5: continue
+                y = np.nanmean(psth[:, m], axis=1)
+                sem = np.nanstd(psth[:, m], axis=1) / np.sqrt(m.sum())
+                ax.plot(time_axis, y, lw=2.0, label=f"pL={p}")
+                ax.fill_between(time_axis, y - sem, y + sem, alpha=0.3)
+            ax.axvline(0, color="black", ls="--", lw=1)
+            if ax.has_data():
+                ax.legend(frameon=False, fontsize=6)
+
+        # # 5️⃣ Row 5: incorrect by probabilityLeft
+        # ax = axes[4, col]
+        # if len(probs) > 0:
+        #     for p in probs:
+        #         m = mask_incorrect & (df_trials.probabilityLeft.values[kept] == p)
+        #         if m.sum() < 5: continue
+        #         ax.plot(time_axis, np.nanmean(psth[:, m], axis=1), lw=2.0, label=f"pL={p}")
+        #     if ax.has_data():
+        #         ax.legend(frameon=False, fontsize=6)
+        #     else:
+        #         print(f"⚠️ No valid Incorrect-by-pLeft data for event '{event}'") 
+
+        # 5️⃣ Row 5: incorrect by probabilityLeft
+        ax = axes[4, col]
+        if len(probs) > 0:
+            for p in probs:
+                m = mask_incorrect & (df_trials.probabilityLeft.values[kept] == p)
+                if m.sum() < 5: continue
+                y = np.nanmean(psth[:, m], axis=1)
+                sem = np.nanstd(psth[:, m], axis=1) / np.sqrt(m.sum())
+                ax.plot(time_axis, y, lw=2.0, label=f"pL={p}")
+                ax.fill_between(time_axis, y - sem, y + sem, alpha=0.3)
+            ax.axvline(0, color="black", ls="--", lw=1)
+            if ax.has_data():
+                ax.legend(frameon=False, fontsize=6)
+
+
+    # --- Force legend display for first row (Correct vs Incorrect)
+    for col in range(len(events)):
+        ax = axes[0, col]
+        lines = ax.get_lines()
+        if len(lines) > 0:
+            ax.legend(
+                handles=lines[:2],  
+                labels=["Correct", "Incorrect"],
+                frameon=False,
+                fontsize=6,
+                loc="upper right"
+            )
+
+    # ---- plot format ----
+    for ax in axes.flat:
+        if not ax.has_data():
+            ax.set_axis_off()
+            continue
+        ax.axhline(0, color="gray", ls="--", lw=0.5)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_ylim(ylim)
+
+    # Row labels
+    for r, label in enumerate([
+        "Correct vs Incorrect",
+        "Correct by Contrast",
+        "Incorrect by Contrast",
+        "Correct by pLeft",
+        "Incorrect by pLeft"
+    ]):
+        axes[r,0].set_ylabel(label, fontsize=9)
+
+    fig.suptitle(f"{subject} – {region} – {date} PSTH Grid", fontsize=14, weight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.show() 
+
+
+plot_psth_grid(
+    df_nph, df_trials,
+    subject="ZFM-04019",
+    region=region,
+    date=date
+)
 
 
 
