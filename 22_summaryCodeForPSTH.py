@@ -610,7 +610,7 @@ for EVENT in ["stimOnTrigger_times", "feedback_times"]:
     plot_psth(df_nph, df_trials, subject, region, date, i=i,
                 event=EVENT, time_window=(-1, 2),
                 ylim=(-2, 3), 
-                save_path="/home/kceniabougrova/Documents/2025_10_31_POSTER_SfN/01_psth_DA_example/psth_example_DA_1session.png", 
+                # save_path="/home/kceniabougrova/Documents/2025_10_31_POSTER_SfN/01_psth_DA_example/psth_example_DA_1session.png", 
                 show=True)
 
 
@@ -1020,6 +1020,330 @@ plot_psth_grid(
     region=region,
     date=date
 )
+
+
+
+# %%
+import numpy as np
+
+import pandas as pd
+
+from matplotlib import pyplot as plt
+
+
+
+from one.api import ONE
+
+from brainbox.io.one import PhotometrySessionLoader #ibllib be on branch photometry integration
+
+
+
+from iblphotometry import metrics #be on develop branch
+
+
+
+
+
+def get_responses(photometry, trials, event, time_window=(-1, 2)):
+
+    """Return peri-event aligned zdFF and time axis."""
+
+    t = photometry.index.values
+
+    SAMPLING_RATE = int(1 / np.mean(np.diff(t)))
+
+    calcium = photometry.values
+
+    t_events = trials[event].dropna().values
+
+    n_trials = len(t_events)
+
+    samples_window = np.arange(time_window[0]*SAMPLING_RATE, time_window[1]*SAMPLING_RATE)
+
+    psth_idx = np.tile(samples_window[:, None], (1, n_trials))
+
+    event_idx = np.searchsorted(t, t_events)
+
+    psth_idx += event_idx
+
+    psth_idx = psth_idx[(psth_idx >= 0) & (psth_idx < len(t))].reshape(-1, n_trials)
+
+    responses = calcium[psth_idx]
+
+    return responses
+
+
+
+def get_response_tpts(photometry, time_window=(-1, 2)):
+
+    t = photometry.index.values
+
+    SAMPLING_RATE = int(1 / np.mean(np.diff(t)))
+
+    samples_window = np.arange(time_window[0]*SAMPLING_RATE, time_window[1]*SAMPLING_RATE)
+
+    return np.linspace(time_window[0], time_window[1], samples_window.shape[0])
+
+
+
+
+
+df_sessions = pd.read_parquet('metadata/sessions_2025-10-31-20h08.pqt')
+
+
+
+# ~df_sessions = pd.read_parquet('metadata/sessions_2025-10-31-20h10.pqt')
+
+# ~df_sessions = df_sessions.query('session_status == "good"')
+
+# ~df_sessions['has_photometry'] = df_sessions['alf/photometry/photometry.signal.pqt']
+
+# ~df_sessions = df_sessions.query('has_photometry == True')
+
+
+
+df_insertions = pd.read_csv('metadata/insertions_all.csv')
+
+df_insertions['hemisphere'] = df_insertions['X-ml_um'].apply(lambda x: 'l' if x > 0 else 'r')
+
+
+
+one = ONE()
+
+
+
+responses = []
+
+for idx, session in tqdm(df_sessions.query('NM == "ACh" and session_type == "biased"').iterrows()):
+
+    try:
+
+        loader = PhotometrySessionLoader(eid=session['eid'], one=one)
+
+        loader.load_photometry()
+
+        loader.load_trials()
+
+    except:
+
+        continue
+
+
+
+    subject = session['subject']
+
+    insertions = df_insertions.query('subject == @subject')
+
+
+
+    n_unique = metrics.n_unique_samples(loader.photometry['GCaMP'])
+
+    if n_unique < 500:
+
+        continue
+
+
+
+    loader.trials['contrastLeft'] = -1 * loader.trials['contrastLeft']
+
+    loader.trials['signed_contrast'] = loader.trials['contrastRight'].combine_first(loader.trials['contrastLeft'])
+
+
+
+    for target in loader.photometry['GCaMP'].columns:
+
+        # Check we will be able to say which hemisphere the fiber is in
+
+        if len(insertions) > 1 and len(target.split('-')) == 1:
+
+            continue
+
+        hemisphere = insertions['hemisphere'].iloc[0]
+
+
+
+        tpts = get_response_tpts(
+
+            loader.photometry['GCaMP'][target]
+
+            )
+
+
+
+        for event in ['stimOn_times', 'feedback_times']:
+
+            for (p, c, fb), trials in loader.trials.groupby(['probabilityLeft', 'signed_contrast', 'feedbackType']):
+
+                resp_dict = {
+
+                    'subject': session['subject'],
+
+                    'eid': session['eid'],
+
+                    'session_type': session['session_type'],
+
+                    'NM': session['NM'],
+
+                    'target': target.split('-')[0],
+
+                    'hemisphere': hemisphere,
+
+                    'p_left': p,
+
+                    'signed_contrast': c,
+
+                    'feedback': fb,
+
+                    'event': event,
+
+                    }
+
+                resp_dict['responses'] = get_responses(
+
+                    loader.photometry['GCaMP'][target],
+
+                    trials,
+
+                    event
+
+                    ).T
+
+                resp_dict['tpts'] = tpts
+
+                responses.append(resp_dict)
+
+df_responses = pd.DataFrame(responses).explode('responses')
+
+
+
+def normalize_response(trial, twindow=(-0.1, 0)):
+
+    tpts = trial['tpts']
+
+
+
+fig, ax = plt.subplots(dpi=300)
+
+mask_correct = df_trials.feedbackType.values == 1
+
+mask_incorrect = ~mask_correct
+
+
+
+# Plot all trials (optional)
+
+plt.plot(time_axis, photometry_feedback[:, mask_correct], color='#0077b6', alpha=0.1, linewidth=0.5)
+
+plt.plot(time_axis, photometry_feedback[:, mask_incorrect], color='red', alpha=0.1, linewidth=0.5)
+
+
+
+# Mean ± SEM
+
+mean_correct = np.nanmean(photometry_feedback[:, mask_correct], axis=1)
+
+mean_incorrect = np.nanmean(photometry_feedback[:, mask_incorrect], axis=1)
+
+sem_correct = np.nanstd(photometry_feedback[:, mask_correct], axis=1) / np.sqrt(mask_correct.sum())
+
+sem_incorrect = np.nanstd(photometry_feedback[:, mask_incorrect], axis=1) / np.sqrt(mask_incorrect.sum())
+
+
+
+plt.plot(time_axis, mean_correct, color='#0077b6', linewidth=2.5, label='Correct')
+
+plt.fill_between(time_axis, mean_correct - sem_correct, mean_correct + sem_correct,
+
+                color='#0077b6', alpha=0.3)
+
+plt.plot(time_axis, mean_incorrect, color='red', linewidth=2.5, label='Incorrect')
+
+plt.fill_between(time_axis, mean_incorrect - sem_incorrect, mean_incorrect + sem_incorrect,
+
+                color='red', alpha=0.3)
+
+
+
+plt.axvline(x=0, color='black', linestyle='--', linewidth=2)
+
+plt.title(f"{i} - PSTH peri-{EVENT} — {subject} {region} {date}")
+
+plt.xlabel("Time (s)")
+
+plt.ylabel("ΔF/F (z-scored)")
+
+plt.legend(frameon=False)
+
+plt.ylim(-2,3)
+
+
+
+
+
+
+
+# ~collection = 'alf/task_00' if 'raw_task_data_00' in one.list_collections(eid) else 'alf'
+
+# ~trials = one.load_dataset(eid, '*trials.table', collection=collection)
+
+# ~photometry = one.load_dataset(eid, 'alf/photometry/photometry.signal')
+
+# ~locations = one.load_dataset(eid, 'alf/photometry/photometryROI.locations.pqt')
+
+
+#%%
+# above = code from DC
+
+# below, the part to plot
+
+
+a = pd.read_parquet('/home/kceniabougrova/Documents/NM_project_fromIBLserver/responses_2025-11-04-19h39.pqt')
+
+df_responses = a 
+
+# Convenience columns
+df_responses = df_responses.dropna(subset='response')
+df_responses['contrast'] = df_responses['signed_contrast'].apply(np.abs)
+df_responses['hemisphere'] = df_responses['hemisphere'].apply(
+    lambda x: 1 if x == 'r' else -1
+    )
+
+
+
+# Normalize the responses
+df_responses.loc[:, 'response'] = df_responses.apply(
+    normalize_response, axis='columns'
+    )
+
+# Resample the responses to a common time-base
+new_tpts = np.linspace(-0.9, 1.9, 90)
+df_responses.loc[:, 'response'] = df_responses.apply(
+    lambda x: resample_response(x, new_tpts), axis='columns'
+    )
+df_responses.loc[:, 'tpts'] = df_responses.apply(lambda x: new_tpts, axis='columns')
+
+# Plot responses by contrast for each target-NM in the 50-50 block
+df_unbiased = df_responses.query('p_left == 0.5')
+for (target, NM), df_target in df_unbiased.groupby(['target', 'NM']):
+    for event in EVENTS:
+        df_event = df_target.query('event == @event')
+        fig, ax = plt.subplots()
+        ax.set_title(f'{target}-{NM} - {event}')
+        plt.axvline(0, color='black', linestyle='--')
+        for contrast, trials in df_event.groupby('contrast'):
+            plot_mean_response(
+                trials,
+                ax=ax,
+                color=COLORS[f'contrast_{contrast}'],
+                label=f'{contrast:.4f}'
+                )
+        ax.legend(title='Contrast')
+        plt.savefig('/home/kceniabougrova/Documents/2025_10_31_POSTER_SfN/02_psth_colors_3events/'+f'{target}_{NM}_{event}'+'.pdf')
+        plt.savefig('/home/kceniabougrova/Documents/2025_10_31_POSTER_SfN/02_psth_colors_3events/'+f'{target}_{NM}_{event}'+'.png')
+        plt.show()
+
+
+
 
 
 
