@@ -614,7 +614,7 @@ def compute_psychometric(trials, signed_contrast=None, block=None, plotting=Fals
             parmin=np.array([np.min(contrasts), 0., 0., 0.]),
             parmax=np.array([np.max(contrasts), 100., 1, 1]))
 
-    return psych
+    return psych #psych = [bias, threshold, gamma_low, gamma_high]
 
 contrasts_2 = [-100. , -25. , 0. , 25. , 100. ]
 
