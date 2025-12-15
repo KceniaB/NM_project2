@@ -1,0 +1,596 @@
+import numpy as np
+import pandas as pd
+import traceback
+from pprint import pprint
+from tqdm import tqdm
+tqdm.pandas()
+from datetime import datetime
+from scipy import stats
+from matplotlib import pyplot as plt
+
+from one.api import ONE
+from brainbox.io.one import PhotometrySessionLoader
+
+from iblphotometry import metrics
+
+SESSIONS_FNAME = 'sessions_2025-11-04-14h45'
+EVENTS = ['stimOn_times', 'firstMovement_times', 'feedback_times']
+TRIAL_TYPES = ['probabilityLeft', 'signed_contrast', 'feedbackType']
+N_TRIALS_SESSION = 90
+N_TRIALS = 5
+contrast_cmap = plt.get_cmap("inferno_r", 5)
+CONTRAST_COLORS = {
+    'contrast_0.0': contrast_cmap(0),
+    'contrast_0.0625': contrast_cmap(1),
+    'contrast_0.125': contrast_cmap(2),
+    'contrast_0.25': contrast_cmap(3),
+    'contrast_1.0': contrast_cmap(4),
+}
+NM_COLORS = {
+    'DA':  '#de2d26',   # red gradient
+    '5HT': '#8e44ad',   # purple gradient
+    'NE':  '#2171b5',   # blue gradient
+    'ACh': '#31a354'    # green gradient
+}
+
+# Set font sizes
+plt.rcParams.update({
+    'font.size': 18,
+    'axes.labelsize': 18,
+    'axes.titlesize': 18,
+    'xtick.labelsize': 18,
+    'ytick.labelsize': 18,
+    'legend.fontsize': 18
+})
+
+def get_responses(photometry, trials, event, time_window=(-1, 2)):
+    """Return peri-event aligned zdFF and time axis."""
+    t = photometry.index.values
+    SAMPLING_RATE = int(1 / np.mean(np.diff(t)))
+    calcium = photometry.values
+    t_events = trials[event].dropna().values
+    t_events= t_events[
+        (t_events + time_window[0] >= t.min()) & (t_events + time_window[1] <= t.max())
+        ]
+    n_trials = len(t_events)
+    samples_window = np.arange(time_window[0]*SAMPLING_RATE, time_window[1]*SAMPLING_RATE)
+    psth_idx = np.tile(samples_window[:, None], (1, n_trials))
+    event_idx = np.searchsorted(t, t_events)
+    psth_idx += event_idx
+    # ~psth_idx = psth_idx[(psth_idx >= 0) & (psth_idx < len(t))].reshape(-1, n_trials)
+    responses = calcium[psth_idx]
+    return responses
+
+
+def get_response_tpts(photometry, time_window=(-1, 2)):
+    t = photometry.index.values
+    SAMPLING_RATE = int(1 / np.mean(np.diff(t)))
+    samples_window = np.arange(time_window[0]*SAMPLING_RATE, time_window[1]*SAMPLING_RATE)
+    return np.linspace(time_window[0], time_window[1], samples_window.shape[0])
+
+
+def normalize_response(trial, bwin=(-0.1, 0), divide=True):
+    i0, i1 = trial['tpts'].searchsorted(bwin)
+    bval = trial['response'][i0:i1].mean()
+    resp_norm = trial['response'] - bval
+    if divide:
+        resp_norm = resp_norm / bval
+    return resp_norm
+
+
+def resample_response(trial, new_tpts, fill_value=np.nan):
+    """
+    Resample response data to a new time base using linear interpolation.
+
+    Parameters:
+    -----------
+    row : pd.Series
+        Row containing 'tpts' and 'response' arrays
+    new_timebase : np.ndarray
+        Target time points for resampling
+    fill_value : float, optional
+        Value to use for points outside the original time range.
+        Default is np.nan. Can also use a tuple (left_fill, right_fill)
+        for different values on each side.
+
+    Returns:
+    --------
+    np.ndarray
+        Resampled response values at new_timebase points
+    """
+    return np.interp(
+        new_tpts, trial['tpts'], trial['response'],
+        left=fill_value, right=fill_value
+        )
+
+# Get response magnitudes
+def get_response_magnitude(trial, method='mean', twindow=(0, 0.5)):
+    i0, i1 = trial['tpts'].searchsorted(twindow)
+    if i0 == i1:
+        return np.nan
+    if method == 'mean':
+        return np.mean(trial['response'][i0:i1].mean())
+    elif method == 'slope':
+        t = trial['tpts'][i0:i1]
+        y = trial['response'][i0:i1]
+        if len(y) < 5:
+            return np.nan
+        slope, _, _, _, _ = stats.linregress(t, y)
+        return slope
+    else:
+        raise NotImplementedError
+
+def plot_mean_response(trials, color='black', plot_all=False, ax=None, dpi=300, **kwargs):
+    if ax is None:
+        fig, ax = plt.subplots(dpi=dpi)
+
+    if plot_all:
+        for _, trial in trials.iterrows():
+            ax.plot(trial['tpts'], trial['response'], color=color, alpha=0.1)
+
+    tpts = trials['tpts'].iloc[0]
+    responses = np.stack(trials['response'])
+    mean = np.mean(responses, axis=0)
+    sem = stats.sem(responses, axis=0)
+
+    ax.plot(tpts, mean, color=color, **kwargs)
+    ax.fill_between(tpts, mean - sem, mean + sem, alpha=0.25, color=color)
+
+    return ax
+
+def pval2stars(p, ns='n.s.', na='n/a'):
+    if np.isnan(p):
+        return na
+    elif p < 0.001:
+        return '***'
+    elif p < 0.01:
+        return '**'
+    elif p < 0.05:
+        return '*'
+    else:
+        return ns
+
+def cm2in(cm):
+    return cm / 2.54
+
+def set_plotsize(w, h=None, ax=None):
+    """
+    Set the size of a matplotlib axes object in cm.
+
+    Parameters
+    ----------
+    w, h : float
+        Desired width and height of plot, if height is None, the axis will be
+        square.
+
+    ax : matplotlib.axes
+        Axes to resize, if None the output of plt.gca() will be re-sized.
+
+    Notes
+    -----
+    - Use after subplots_adjust (if adjustment is needed)
+    - Matplotlib axis size is determined by the figure size and the subplot
+      margins (r, l; given as a fraction of the figure size), i.e.
+      w_ax = w_fig * (r - l)
+    """
+    if h is None: # assume square
+        h = w
+    w = cm2in(w) # convert cm to inches
+    h = cm2in(h)
+    if not ax: # get current axes
+        ax = plt.gca()
+    # get margins
+    l = ax.figure.subplotpars.left
+    r = ax.figure.subplotpars.right
+    t = ax.figure.subplotpars.top
+    b = ax.figure.subplotpars.bottom
+    # set fig dimensions to produce desired ax dimensions
+    figw = float(w)/(r-l)
+    figh = float(h)/(t-b)
+    ax.figure.set_size_inches(figw, figh)
+
+def clip_axes_to_ticks(ax=None, spines=['left', 'bottom'], ext={}):
+    """
+    Clip the axis lines to end at the minimum and maximum tick values.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes
+        Axes to resize, if None the output of plt.gca() will be re-sized.
+
+    spines : list
+        Axes to keep and clip, axes not included in this list will be removed.
+        Valid values include 'left', 'bottom', 'right', 'top'.
+
+    ext : dict
+        For each axis in ext.keys() ('left', 'bottom', 'right', 'top'),
+        the axis line will be extended beyond the last tick by the value
+        specified, e.g. {'left':[0.1, 0.2]} will results in an axis line
+        that extends 0.1 units beyond the bottom tick and 0.2 unit beyond
+        the top tick.
+    """
+    if ax is None:
+        ax = plt.gca()
+    spines2ax = {
+        'left': ax.yaxis,
+        'top': ax.xaxis,
+        'right': ax.yaxis,
+        'bottom': ax.xaxis
+    }
+    all_spines = ['left', 'bottom', 'right', 'top']
+    for spine in spines:
+        low = min(spines2ax[spine].get_majorticklocs())
+        high = max(spines2ax[spine].get_majorticklocs())
+        if spine in ext.keys():
+            low += ext[spine][0]
+            high += ext[spine][1]
+        ax.spines[spine].set_bounds(low, high)
+    for spine in [spine for spine in all_spines if spine not in spines]:
+        ax.spines[spine].set_visible(False)
+
+
+# Load the sessions
+df_sessions = pd.read_parquet(f'/home/kceniabougrova/Documents/NM_project_fromIBLserver/NM_project2/CQ_PosterSfN_DC/{SESSIONS_FNAME}.pqt')
+
+# Restrict the dataframe based on session QC
+# ~df_sessions = pd.read_parquet('metadata/sessions_2025-10-31-20h10.pqt')
+# ~df_sessions = df_sessions.query('session_status == "good"')
+# ~df_sessions['has_photometry'] = df_sessions['alf/photometry/photometry.signal.pqt']
+# ~df_sessions = df_sessions.query('has_photometry == True')
+
+# Restrict the dataframe to sessions we're interested in
+# ~df_sessions = df_sessions.query('NM == "ACh" and session_type == "biased"')
+df_sessions = df_sessions.query('session_type == "biased"')
+
+# Load the insertions table
+df_insertions = pd.read_csv('/home/kceniabougrova/Documents/NM_project_fromIBLserver/NM_project2/CQ_PosterSfN_DC/insertions_all.csv')
+df_insertions['hemisphere'] = df_insertions['X-ml_um'].apply(lambda x: 'l' if x > 0 else 'r')
+
+# Connect to the database
+one = ONE()
+
+# Loop over sessions
+responses = []
+exceptions_log = []
+for idx, session in tqdm(df_sessions.iloc[8:12].iterrows(), total=len(df_sessions)):
+    try:  # try to get data the new way
+        loader = PhotometrySessionLoader(eid=session['eid'], one=one)
+        loader.load_photometry()
+        loader.load_trials()
+    except Exception as e:
+        exception_info = {  # collect exception info
+            'eid': session['eid'],
+            'exception_type': type(e).__name__,
+            'exception_message': str(e),
+            'traceback': traceback.format_exc()
+        }
+        exceptions_log.append(exception_info)
+        pprint(exception_info)
+        continue
+
+    # Make sure some basic QC checks are passed
+    try:  # check the number of trials in the session
+        n_trials = len(loader.trials)
+        assert n_trials >= N_TRIALS_SESSION
+    except Exception as e:
+        exception_info = {  # collect exception info
+            'eid': session['eid'],
+            'exception_type': type(e).__name__,
+            'exception_message': str(e),
+            'traceback': traceback.format_exc()
+        }
+        exceptions_log.append(exception_info)
+        pprint(exception_info)
+        continue
+    try:  # check the signal has no sampling issues
+        full_photometry = pd.concat(
+            [loader.photometry['GCaMP'], loader.photometry['Isosbestic']]
+            ).sort_index()
+        n_early = metrics.n_early_samples(full_photometry)
+        n_unique = metrics.n_unique_samples(loader.photometry['GCaMP'])
+        assert n_early == 0 and n_unique > 500
+    except Exception as e:
+        exception_info = {  # collect exception info
+            'eid': session['eid'],
+            'exception_type': type(e).__name__,
+            'exception_message': str(e),
+            'traceback': traceback.format_exc()
+        }
+        exceptions_log.append(exception_info)
+        pprint(exception_info)
+        continue
+
+    # Get the insertion info for this subject
+    subject = session['subject']
+    insertions = df_insertions.query('subject == @subject')
+
+    loader.trials['contrastLeft'] = -1 * loader.trials['contrastLeft']
+    # Convert to string
+    loader.trials['contrastLeft_str'] = loader.trials['contrastLeft'].apply(
+        lambda x: f"{x:.2f}".rstrip('0').rstrip('.') if x != 0 else "-0" if np.signbit(x) else "0"
+    )
+    loader.trials['contrastRight_str'] = loader.trials['contrastRight'].apply(
+        lambda x: f"{x:.2f}".rstrip('0').rstrip('.') if x != 0 else "-0" if np.signbit(x) else "0"
+    )
+    # Combine while preserving strings
+    # loader.trials['signed_contrast'] = loader.trials['contrastRight_str'].combine_first(
+    #     loader.trials['contrastLeft_str'])
+    for col in ['contrastRight_str', 'contrastLeft_str']:
+        loader.trials[col] = loader.trials[col].replace(['nan', 'NaN', 'None', ''], np.nan)
+
+    loader.trials['signed_contrast'] = loader.trials['contrastRight_str'].fillna(
+        loader.trials['contrastLeft_str']
+    )
+
+
+    loader.trials['reaction_times'] = (
+        loader.trials['response_times'] - loader.trials['stimOn_times'])
+
+    # Loop over target brain areas for this subject
+    for target in loader.photometry['GCaMP'].columns:
+        photometry = loader.photometry['GCaMP'][target]
+
+        # Check we will be able to say which hemisphere the fiber is in
+        try:
+            single_insertion = len(insertions) == 1
+            hyphenated_target = len(target.split('-')) == 2
+            assert single_insertion or hyphenated_target
+            if hyphenated_target:
+                hemi_in_target = target.split('-')[1] in ['l', 'r']
+                assert hemi_in_target
+        except Exception as e:
+            exception_info = {  # collect exception info
+                'eid': session['eid'],
+                'exception_type': type(e).__name__,
+                'exception_message': str(e),
+                'traceback': traceback.format_exc()
+            }
+            exceptions_log.append(exception_info)
+            pprint(exception_info)
+            continue
+
+        # Use the appropriate information to assign laterality to the fiber
+        if len(target.split('-')) == 2:  # try target name first
+            hemisphere = target.split('-')[1]
+        else:  # fall back to insertions table
+            hemisphere = insertions['hemisphere'].iloc[0]
+
+        # Get the time points relative to the event (same for all)
+        tpts = get_response_tpts(
+            loader.photometry['GCaMP'][target]
+            )
+
+        # For each event
+        for event in EVENTS:
+
+            # Restrict to trials in the photometry time-base
+            ## FIXME: check why this happens so often
+            trials = loader.trials[
+                (loader.trials[event] - 1 >= photometry.index.min()) &
+                (loader.trials[event] + 2 <= photometry.index.max())
+                ]
+            if len(trials) < len(loader.trials):
+                exception_info = {
+                    'eid': session['eid'],
+                    'description': "trials outside of photometry time base"
+                }
+                exceptions_log.append(exception_info)
+
+            # Collect the info in a dict
+            resp_dict = {
+                'subject': session['subject'],
+                'eid': session['eid'],
+                'session_type': session['session_type'],
+                'NM': session['NM'],
+                'target': target.split('-')[0],
+                'hemisphere': hemisphere,
+                'p_left': trials['probabilityLeft'].values.astype(float),
+                'signed_contrast': trials['signed_contrast'].values.astype(float),
+                'choice': trials['choice'].values.astype(float),
+                'feedback': trials['feedbackType'].values.astype(float),
+                'reaction_time': trials['reaction_times'].values.astype(float),
+                'event': event,
+                'tpts': tpts
+                }
+
+            # Get the responses for each trial
+            resp_dict['response'] = get_responses(
+                photometry, trials, event
+                ).T
+
+            # Append to list
+            responses.append(resp_dict)
+
+# Convert list to dataframe, and 'explode' such that each trial gets a row
+df_responses = pd.DataFrame(responses).explode(
+    ['response', 'reaction_time', 'signed_contrast', 'choice', 'p_left', 'feedback']
+    ).reset_index(drop=True)
+# Convert columns to float
+cols_to_fix = ['reaction_time', 'choice', 'signed_contrast', 'p_left', 'feedback']
+df_responses[cols_to_fix] = df_responses[cols_to_fix].astype(float)
+
+# Save the response dataframe
+timestamp = datetime.now().strftime("%Y-%m-%d-%Hh%M")
+df_responses.to_parquet(f'responses_{timestamp}.pqt')
+
+# Load the dataframe (in case you already ran the loop)
+df_responses = pd.read_parquet('responses_2025-11-05-10h32.pqt')
+
+# Print some metadata
+n_mice = df_responses.groupby(['target', 'NM']).apply(
+    lambda x: x['subject'].nunique(), include_groups=False
+    )
+print("N mice per target-NM")
+print(n_mice)
+n_sessions = df_responses.groupby(['target', 'NM']).apply(
+    lambda x: x['eid'].nunique(), include_groups=False
+    )
+print("\nN sessions per target-NM")
+print(n_sessions)
+
+# Add convenience columns for analyses
+df_responses = df_responses.dropna(subset='response')
+df_responses['contrast'] = df_responses['signed_contrast'].apply(np.abs)
+df_responses['hemisphere'] = df_responses['hemisphere'].apply(
+    lambda x: 1 if x == 'r' else -1
+    )
+df_responses['relative_contrast'] = df_responses.apply(
+    lambda x: x['signed_contrast'] * x['hemisphere'],
+    axis='columns'
+    )
+df_responses['side'] = df_responses.apply(
+    lambda x: np.sign(x['relative_contrast']), axis='columns'
+    )
+# Log-transform contrast (need to eleminate 0 contrast first)
+# ~df_responses['log_contrast'] = df_responses['contrast'].apply(np.log10)
+
+# Normalize the responses
+df_responses.loc[:, 'response'] = df_responses.apply(
+    normalize_response, axis='columns'
+    )
+
+# Resample the responses to a common time-base
+new_tpts = np.linspace(-0.9, 1.9, 90)
+df_responses.loc[:, 'response'] = df_responses.apply(
+    lambda x: resample_response(x, new_tpts), axis='columns'
+    )
+df_responses.loc[:, 'tpts'] = df_responses.apply(lambda x: new_tpts, axis='columns')
+
+rts = [
+    np.log10(t['reaction_time'].dropna().values)
+    for _, t in df_responses.groupby('contrast')
+    ]
+fig, ax = plt.subplots()
+parts = ax.violinplot(
+    rts,
+    showextrema=False,
+    showmeans=True,
+    orientation='horizontal'
+    )
+cmap = plt.colormaps['Greys']
+colors = cmap(np.linspace(0.4, 0.99, len(rts)))
+for pc, color in zip(parts['bodies'], colors):
+    pc.set_facecolor(color)
+parts['cmeans'].set_colors(colors)
+for i, rt in enumerate(rts):
+    ax.text(
+        rt.mean(), i + 1, f'{10**rt.mean():.2f}s', rotation=45, ha='left', va='bottom'
+        )
+contrasts = df_responses['contrast'].unique()
+ax.set_yticks(np.arange(1, len(contrasts) + 1))
+ax.set_yticklabels([f'{c*100:.0f}' for c in sorted(contrasts)])
+ax.set_ylabel('Contrast level')
+xticks = np.linspace(-2, 2, 6)
+ax.set_xticks(xticks)
+ax.set_xticklabels(['$10^{%d}$' % t for t in xticks])
+ax.set_xlim([-2.1, 2])
+ax.set_xlabel('Reaction time (s)')
+clip_axes_to_ticks(ax=ax)
+set_plotsize(w=12, h=4, ax=ax)
+fig.savefig('figures/reaction_times.svg')
+
+# Plot responses by contrast for each target-NM in the 50-50 block
+df_unbiased = df_responses.query('p_left == 0.5')
+for (target, NM), df_target in df_unbiased.groupby(['target', 'NM']):
+    for event in EVENTS:
+        df_event = df_target.query('event == @event')
+        n_sessions = df_target['eid'].nunique()
+        n_mice = df_target['subject'].nunique()
+        fig, axs = plt.subplots(1, 2)
+        fig.suptitle(f'{target}-{NM} - {event} ({n_sessions} sessions, {n_mice} mice)')
+        for ax, feedback in zip(axs, [1, -1]):
+            label = 'Correct' if feedback == 1 else 'Incorrect'
+            ax.set_title(f'{label} trials')
+            for contrast, trials in df_event.query(f'feedback == {feedback}').groupby('contrast'):
+                plot_mean_response(
+                    trials,
+                    ax=ax,
+                    color=COLORS[f'contrast_{contrast}'],
+                    label=f'{contrast:.4f} (N = {len(trials)})'
+                    )
+            ax.axhline(0, ls='--', color='gray')
+            ax.axvline(0, ls='--', color='gray')
+            ax.set_xlabel('Time from event (s)')
+            ax.set_ylabel('$\Delta$F / F')
+            ax.legend(title='Contrast', loc='upper right', bbox_to_anchor=(0.98,0.98))
+        ymax = max([ax.get_yticks().max() for ax in axs])
+        ymin = min([ax.get_yticks().min() for ax in axs])
+        for ax in axs:
+            ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
+            ax.set_yticks(np.linspace(ymin, ymax, 5))
+        # ~clip_axes_to_ticks(ax=ax)
+        set_plotsize(w=24, h=12, ax=ax)
+        fig.savefig(f'figures/{event.split("_")[0]}_{target}-{NM}_BCW_pleft0.5.svg')
+
+# Plot response magnitude for relative contrasts
+for (target, NM), df_target in df_responses.groupby(['target', 'NM']):
+    for event in EVENTS:
+        df_event = df_target.query('event == @event').copy()
+        fig, ax = plt.subplots()
+        ax.set_title(f'{target}-{NM} - {event.split('_')[0]}')
+        for feedback, alpha in zip([1, -1], [1, 0.5]):
+            contrast_groups = df_event.query('feedback == @feedback').groupby('relative_contrast')
+            contrasts = np.array(list(contrast_groups.groups.keys()))
+            ax.errorbar(
+                np.arange(len(contrast_groups)),
+                contrast_groups['response_mean'].mean(),
+                yerr=contrast_groups['response_mean'].sem(),
+                marker='o',
+                color=NM_COLORS[NM],
+                alpha=alpha,
+                label=feedback
+                )
+        ax.text(0.05, 0.05, 'Contra', ha='left', va='bottom', transform=ax.transAxes)
+        ax.text(0.95, 0.05, 'Ipsi', ha='right', va='bottom', transform=ax.transAxes)
+        ax.set_xticks(np.arange(len(contrasts)))
+        ax.set_xticklabels([f'{c*100:.0f}' for c in contrasts])
+        ax.set_xlabel('Contrast level')
+        ax.set_yticks(ax.get_yticks())
+        ax.set_ylabel('$\Delta$F/F')
+        ax.legend(title='Reward', loc='upper left', bbox_to_anchor=(1, 1))
+        clip_axes_to_ticks(ax=ax)
+        set_plotsize(w=12, h=12, ax=ax)
+        fig.savefig(f'figures/{target}-{NM}_{event}0.25s_signedContrast.svg')
+
+
+df_responses['response_mean'] = df_responses.progress_apply(
+    lambda x: get_response_magnitude(x, method='mean', twindow=(0, 0.5)),
+    # ~lambda x: get_response_magnitude(x, twindow=(0, x['firstMovement_times'])),
+    axis='columns'
+    )
+df_responses['response_slope'] = df_responses.progress_apply(
+    lambda x: get_response_magnitude(x, method='slope', twindow=(0, 0.25)),
+    axis='columns'
+    )
+
+
+# ~from pymer4.models import Lmer
+# ~from rpy2.robjects import pandas2ri
+# ~pandas2ri.activate()
+
+# ~df_unbiased = df_responses.query('p_left == 0.5 and side != 0')
+# ~lmm_formula = f'response_mean ~ contrast * side + (1 | subject)'
+# ~for (target, NM), df_target in df_unbiased.groupby(['target', 'NM']):
+    # ~if df_target['subject'].nunique() < 2:
+        # ~continue
+    # ~for event in ['stimOn_times', 'feedback_times']:
+        # ~df_event = df_target.query('event == @event').copy().reset_index(drop=True)
+        # ~print("\n=================================================================")
+        # ~print(f'{target}-{NM} -- {event}')
+        # ~print(f'LMM: {lmm_formula}')
+        # ~print("=================================================================")
+
+        df_event['contrast'] = df_event['contrast'].apply(lambda x: str(x)).astype('category')
+        # ~df_event['side'] = df_event['side'].apply(lambda x: str(x)).astype('category')
+        # ~df_event['subject'] = df_event['subject']
+        # ~cols = ['subject', 'side', 'contrast', 'response_mean', 'response_slope']
+
+        # ~model = Lmer(lmm_formula, data=df_event[cols])
+        # ~result = model.fit()
+        # ~print(model.warnings)
+        if not model.warnings:
+        # ~print(result)
+        # ~df_result = result.copy()
+        # ~df_result['formula'] = lmm_formula
+        # ~df_result.to_csv(f'results/LMM_{target}-{NM}_{event}.csv')
+

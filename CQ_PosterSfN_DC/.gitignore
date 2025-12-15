@@ -1,0 +1,97 @@
+###############################
+# OS / EDITOR
+###############################
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+###############################
+# PYTHON
+###############################
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.log
+
+###############################
+# NOTEBOOKS
+###############################
+.ipynb_checkpoints/
+# Exclude auto-saved massive Jupyter outputs:
+*.nbconvert.ipynb
+
+###############################
+# DATA (EXCLUDE ALL LARGE FILE TYPES)
+###############################
+# Parquet / Pytables / Arrow
+*.parquet
+*.pqt
+*.pq
+
+# Numpy
+*.npy
+*.npz
+
+# Pickle / joblib
+*.pkl
+*.pickle
+*.joblib
+
+# HDF5 / Matlab
+*.h5
+*.hdf5
+*.mat
+
+# CSV / TSV data dumps
+*.csv
+*.tsv
+*.txt
+
+# Compressed archives
+*.zip
+*.gz
+*.tar
+*.bz2
+
+# Raw fiber photometry data
+*.tdms
+*.mat
+*.bin
+
+###############################
+# IMAGES / FIGURES (OPTIONAL)
+# If figures are huge, exclude them:
+###############################
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+
+# (If you want to keep small plots, remove the block above.)
+
+###############################
+# MODELS / ML
+###############################
+*.pt
+*.pth
+*.h5
+*.onnx
+
+###############################
+# CACHE / TEMP
+###############################
+.cache/
+tmp/
+temp/
+logs/
+output/
+results/
+export/
+n
