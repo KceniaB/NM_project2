@@ -304,7 +304,7 @@ df_responses = pd.read_parquet('/home/kceniabougrova/Documents/NM_project_fromIB
 df_responses = df_responses.query('choice != 0').copy()
 
 # Drop trials where the reaction time is implausible
-df_responses = df_responses.query('reaction_time > 0.05').copy()
+# df_responses = df_responses.query('reaction_time > 0.05').copy()
 
 # Drop ECW for now (some wierd photometry there)
 df_responses = df_responses.query('session_type == "biased"')
@@ -432,23 +432,24 @@ df_original = df_responses.copy()
 
 
 
-#%% 
+#%%
 
 """
 
 
-################################################################################
+#########################################################################################
 
-################################################################################
+#########################################################################################
 
-###### PART 1 - RTs ############################################################
+###### PART 2 - Psychometric ############################################################
 
-################################################################################
+#########################################################################################
 
-################################################################################
+#########################################################################################
 
 
 """
+
 #%%
 """
 #### PLOT RESULTS ##############################################################
@@ -502,11 +503,120 @@ set_plotsize(w=10, h=5, ax=ax)
 #%%
 """
 #############################################################################
-trying RT only in the DR df
-* plots split by correct/incorrect trials
+trying psychometric curve fit by session 
 """
+
+import psychofit as psy
+import numpy as np 
+import pandas as pd
+import matplotlib.pyplot as plt
+from brainbox.behavior.training import plot_psychometric
+
+%matplotlib inline
+%pdoc psy
+
+df_responses['contrastLeft'] = np.where(
+    (df_responses['signed_contrast'] < 0) |
+    ((df_responses['signed_contrast'] == 0) & np.signbit(df_responses['signed_contrast'])),
+    df_responses['signed_contrast'],
+    np.nan
+)
+
+df_responses['contrastRight'] = np.where(
+    (df_responses['signed_contrast'] > 0) |
+    ((df_responses['signed_contrast'] == 0) & ~np.signbit(df_responses['signed_contrast'])),
+    df_responses['signed_contrast'],
+    np.nan
+)
+
+df_responses['probabilityLeft'] = df_responses.p_left
+df_responses['feedbackType'] = df_responses.feedback
+
+
+
+
+
+
+fig, ax = plot_psychometric(df_responses)
+
+
+
+
+# filter
+df_responses
+
+df_responses['choice_right'] = (df_responses['choice'] + 1) / 2
+
+df2 = (
+    df_responses
+    .groupby('signed_contrast')
+    .agg(
+        ntrials=('choice_right', 'count'),
+        fraction=('choice_right', 'mean')
+    )
+    .reset_index()
+)
+
+
+data = np.vstack((
+    df2['signed_contrast'].values,
+    df2['ntrials'].values,
+    df2['fraction'].values
+))
+
+pars, L = psy.mle_fit_psycho(
+    data,
+    P_model='erf_psycho_2gammas',
+    parstart=np.array([0., 20., 0.05, 0.05]),
+    parmin=np.array([df2.signed_contrast.min(), 5., 0., 0.]),
+    parmax=np.array([df2.signed_contrast.max(), 40., 1., 1.])
+)
+
+
+xx = np.linspace(df2.signed_contrast.min(),
+                 df2.signed_contrast.max(), 400)
+
+plt.plot(df2['signed_contrast'], df2['fraction'], 'ko')
+plt.plot(xx, psy.erf_psycho_2gammas(pars, xx), 'r-')
+plt.axhline(0.5, linestyle='--', color='gray')
+plt.axvline(0, linestyle='--', color='gray')
+
+plt.xlabel('Signed contrast')
+plt.ylabel('Fraction rightward')
+plt.ylim([0, 1])
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # df_original = df_responses #to save so I dont need to rerun ttthe code above
-df_5HT = df_responses[df_responses.target == "DR"]
+# df_5HT = df_responses[df_responses.target == "DR"]
 df_responses = df_5HT.copy()
 
 # --- Split dataframe ---
