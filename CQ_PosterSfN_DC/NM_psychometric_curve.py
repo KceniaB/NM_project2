@@ -454,8 +454,8 @@ df_original = df_responses.copy()
 """
 #### PLOT RESULTS ##############################################################
 """
-df_responses = df_original[df_original.event == 'stimOn_times'].copy()
-# df_responses = df_original[df_original.event == 'feedback_times'].copy()
+# df_responses = df_original[df_original.event == 'stimOn_times'].copy()
+df_responses = df_original[df_original.event == 'feedback_times'].copy()
 
 # Plot log reaction time distributions for each contrast level
 rts = [
@@ -503,191 +503,446 @@ set_plotsize(w=10, h=5, ax=ax)
 #%%
 """
 #############################################################################
-trying psychometric curve fit by session 
+Psychometric curve fitting by session
+    - Plotting parameters: constrained, stable (for visualization)
+    - Stats parameters: unconstrained (for inference)
+#############################################################################
 """
 import psychofit as psy
 import numpy as np 
 import pandas as pd
 import matplotlib.pyplot as plt
 from brainbox.behavior.training import plot_psychometric
+from brainbox.behavior.training import compute_performance
 
-%matplotlib inline
-%pdoc psy
+# %matplotlib inline
+# %pdoc psy
 
+# ------------------------------------------------------------------
+# Preprocessing
+# ------------------------------------------------------------------
+# Contrast split with signed zero preserved
+df_responses['contrastLeft'] = np.where(
+    (df_responses['signed_contrast'] < 0) |
+    ((df_responses['signed_contrast'] == 0) & np.signbit(df_responses['signed_contrast'])),
+    df_responses['signed_contrast'],
+    np.nan)
+df_responses['contrastRight'] = np.where(
+    (df_responses['signed_contrast'] > 0) |
+    ((df_responses['signed_contrast'] == 0) & ~np.signbit(df_responses['signed_contrast'])),
+    df_responses['signed_contrast'],
+    np.nan)
+df_responses['probabilityLeft'] = df_responses.p_left
+df_responses['feedbackType'] = df_responses.feedback
+
+# Choice: -1 / +1 → 0 / 1 (probability of choosing right)
+df_responses['choice_right'] = (df_responses['choice'] + 1) / 2
+
+
+# ------------------------------------------------------------------
+# Psychometric fitting
+# ------------------------------------------------------------------
+def fit_psychometric(trials, signed_contrast, block, mode='stats'):
+    """
+    Fit psychometric function using psychofit.
+
+    mode:
+        'plot'  → constrained, stable fits for visualization
+        'stats' → unconstrained fits for inference
+
+    returns:
+        psych = [bias, threshold, gamma_low, gamma_high]
+    """
+
+    prob_right, contrasts, n_trials = compute_performance(
+        trials,
+        signed_contrast=signed_contrast,
+        block=block,
+        prob_right=True
+    )
+    # performance, contrasts, n_contrasts = compute_performance(trials, block=0.5) #old KB
+
+    # return 4 nans if all prob_right is nan
+    if not np.any(~np.isnan(prob_right)): 
+        return np.full(4, np.nan)
+
+    if mode == 'plot':
+        parstart = np.array([0., 40., 0.1, 0.1])
+        parmin   = np.array([-50., 10., 0., 0.])
+        parmax   = np.array([50., 50., 0.2, 0.2])
+        nfits    = 10
+    else:  # stats
+        parstart = np.array([np.mean(contrasts), 20., 0.05, 0.05])
+        parmin   = np.array([np.min(contrasts), 0., 0., 0.])
+        parmax   = np.array([np.max(contrasts), 100., 1., 1.])
+        nfits    = 1
+
+    psych, _ = psy.mle_fit_psycho(
+        np.vstack([contrasts, n_trials, prob_right]),
+        # np.vstack([contrasts, n_contrasts, prob_choose_right])
+        P_model='erf_psycho_2gammas',
+        parstart=parstart,
+        parmin=parmin,
+        parmax=parmax,
+        nfits=nfits
+    )
+
+    return psych  # [bias, threshold, gamma_low, gamma_high]
+
+
+
+# ------------------------------------------------------------------
+# Plotting
+# ------------------------------------------------------------------
+contrasts_ticks = [-100., -25., 0., 25., 100.]
+
+def plot_psychometric(trials, ax=None, title=None, **kwargs):
+
+    signed_contrast = trials['signed_contrast'] * 100
+    contrasts_fit = np.linspace(-100, 100, 400)
+
+    blocks = [0.5, 0.2, 0.8]
+    cmap = {0.5: "#320F42", 0.2: "#E07C12", 0.8: "#008F7C"}
+
+    # Fit parameters for plotting only
+    pars_plot = {
+        b: fit_psychometric(trials, signed_contrast, b, mode='plot')
+        for b in blocks
+    }
+
+    if ax is None:
+        fig, ax = plt.subplots(**kwargs)
+    else:
+        fig = plt.gcf()
+
+    for b in blocks:
+        prob_right, contrasts, _ = compute_performance(
+            trials, signed_contrast=signed_contrast, block=b, prob_right=True
+        )
+
+        ax.plot(
+            contrasts_fit,
+            psy.erf_psycho_2gammas(pars_plot[b], contrasts_fit),
+            color=cmap[b],
+            label=f'pL={b} fit'
+        )
+
+        ax.scatter(
+            contrasts,
+            prob_right,
+            color=cmap[b],
+            label=f'pL={b} data'
+        )
+
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_xlabel('Contrast (%)')
+    ax.set_ylabel('Prob. choosing right')
+
+    ax.set_xticks(contrasts_ticks)
+    ax.axhline(0.5, color='gray', linestyle='--', linewidth=0.5)
+    ax.axvline(0, color='gray', linestyle='--', linewidth=0.5)
+
+    ax.spines[['top', 'right', 'bottom', 'left']].set_visible(False)
+    # ax.legend(frameon=False)
+
+    if title:
+        ax.set_title(title)
+
+    return fig, ax
+
+# ------------------------------------------------------------------
+# Run
+# ------------------------------------------------------------------
+fig, ax = plot_psychometric(df_responses, figsize=(6, 6))
+plt.show()
+
+
+# ------------------------------------------------------------------
+# FINAL OUTPUTS FOR STATS
+# ------------------------------------------------------------------
+signed_contrast = df_responses['signed_contrast'] * 100
+
+pars_stats = {
+    b: fit_psychometric(df_responses, signed_contrast, b, mode='stats')
+    for b in [0.5, 0.2, 0.8]
+}
+
+df_psych_stats = pd.DataFrame.from_dict(
+    pars_stats,
+    orient='index',
+    columns=['bias', 'threshold', 'gamma_low', 'gamma_high']
+).reset_index(names='probabilityLeft')
+
+
+#%% 
+"""example to plot the psychometric curves only from the fit parameters"""
+import numpy as np
+import matplotlib.pyplot as plt
+import psychofit as psy
+
+# Contrast grid
+x = np.linspace(-100, 100, 400)
+
+cmap = {
+    0.5: "#320F42",
+    0.2: "#E07C12",
+    0.8: "#008F7C"}
+
+plt.figure(figsize=(6, 6))
+
+# Loop over blocks
+for _, row in df_psych_stats.iterrows():
+    pL = row['probabilityLeft']
+    pars = row[['bias', 'threshold', 'gamma_low', 'gamma_high']].values
+
+    # Skip invalid fits
+    if np.any(np.isnan(pars)):
+        continue
+
+    y = psy.erf_psycho_2gammas(pars, x)
+
+    plt.plot(
+        x,
+        y,
+        color=cmap[pL],
+        label=f'pL = {pL}'
+    )
+
+# Reference lines
+plt.axhline(0.5, color='gray', linestyle='--', linewidth=0.5)
+plt.axvline(0, color='gray', linestyle='--', linewidth=0.5)
+
+# Formatting
+plt.xlabel('Signed contrast (%)')
+plt.ylabel('P(choose right)')
+plt.ylim(0, 1)
+plt.legend(frameon=False, font_size=12)
+
+plt.show()
+
+
+# %%
+
+
+
+
+
+
+
+
+
+"""
+
+
+#########################################################################################
+
+#########################################################################################
+
+###### PART 3 - Psychometric parameters for all the sessions ############################
+
+#########################################################################################
+
+#########################################################################################
+
+
+"""
+
+
+
+
+
+
+import psychofit as psy
+import numpy as np 
+import pandas as pd
+import matplotlib.pyplot as plt
+from brainbox.behavior.training import plot_psychometric
+from brainbox.behavior.training import compute_performance
+
+# %matplotlib inline
+# %pdoc psy
+
+# ------------------------------------------------------------------
+# Preprocessing
+# ------------------------------------------------------------------
 df_responses['contrastLeft'] = np.where(
     (df_responses['signed_contrast'] < 0) |
     ((df_responses['signed_contrast'] == 0) & np.signbit(df_responses['signed_contrast'])),
     df_responses['signed_contrast'],
     np.nan
 )
-
 df_responses['contrastRight'] = np.where(
     (df_responses['signed_contrast'] > 0) |
     ((df_responses['signed_contrast'] == 0) & ~np.signbit(df_responses['signed_contrast'])),
     df_responses['signed_contrast'],
     np.nan
 )
-
 df_responses['probabilityLeft'] = df_responses.p_left
 df_responses['feedbackType'] = df_responses.feedback
 
-
-
-# filter
-df_responses
-
+# Choice: -1 / +1 → 0 / 1 (probability of choosing right)
 df_responses['choice_right'] = (df_responses['choice'] + 1) / 2
 
-df2 = (
-    df_responses
-    .groupby('signed_contrast')
-    .agg(
-        ntrials=('choice_right', 'count'),
-        fraction=('choice_right', 'mean')
+# ------------------------------------------------------------------
+# Psychometric fitting
+# ------------------------------------------------------------------
+def fit_psychometric(trials, signed_contrast, block, mode='stats'):
+    """
+    Fit psychometric function using psychofit.
+
+    mode:
+        'plot'  → constrained, stable fits for visualization
+        'stats' → unconstrained fits for inference
+
+    returns:
+        psych = [bias, threshold, gamma_low, gamma_high]
+    """
+
+    prob_right, contrasts, n_trials = compute_performance(
+        trials,
+        signed_contrast=signed_contrast,
+        block=block,
+        prob_right=True
     )
-    .reset_index()
-)
+
+    # return 4 nans if all prob_right is nan
+    if not np.any(~np.isnan(prob_right)): 
+        return np.full(4, np.nan)
+
+    if mode == 'plot':
+        parstart = np.array([0., 40., 0.1, 0.1])
+        parmin   = np.array([-50., 10., 0., 0.])
+        parmax   = np.array([50., 50., 0.2, 0.2])
+        nfits    = 10
+    else:  # stats
+        parstart = np.array([np.mean(contrasts), 20., 0.05, 0.05])
+        parmin   = np.array([np.min(contrasts), 0., 0., 0.])
+        parmax   = np.array([np.max(contrasts), 100., 1., 1.])
+        nfits    = 1
+
+    psych, _ = psy.mle_fit_psycho(
+        np.vstack([contrasts, n_trials, prob_right]),
+        P_model='erf_psycho_2gammas',
+        parstart=parstart,
+        parmin=parmin,
+        parmax=parmax,
+        nfits=nfits
+    )
+
+    return psych  # [bias, threshold, gamma_low, gamma_high]
 
 
-
-from brainbox.behavior.training import compute_performance
-trials = df_responses
-# performance, contrasts, n_contrasts = compute_performance(trials)
-# compute performance expressed as probability of choosing right
-# performance, contrasts, n_contrasts = compute_performance(trials, prob_right=True)
-# compute performance during 0.8 biased block or unbiased
-performance, contrasts, n_contrasts = compute_performance(trials, block=0.5)
-
-
-def compute_n_trials(trials):
-    """
-    Compute number of trials in trials object
-
-    :param trials: trials object
-    :type trials: dict
-    returns: int containing number of trials in session
-    """
-    return trials['choice'].shape[0]
-
-
-def compute_psychometric(trials, signed_contrast=None, block=None, plotting=False):
-    """
-    Compute psychometric fit parameters for trials object
-
-    :param trials: trials object that must contain contrastLeft, contrastRight and probabilityLeft
-    :type trials: dict
-    :param signed_contrast: array of signed contrasts in percent, where -ve values are on the left
-    :type signed_contrast: np.array
-    :param block: biased block can be either 0.2 or 0.8
-    :type block: float
-    :return: array of psychometric fit parameters - bias, threshold, lapse high, lapse low
-    """
-
-    if signed_contrast is None:
-        signed_contrast = trials["signed_contrast"]
-
-    if block is None:
-        block_idx = np.full(trials.probabilityLeft.shape, True, dtype=bool)
-    else:
-        block_idx = trials.probabilityLeft == block
-
-    if not np.any(block_idx):
-        return np.nan * np.zeros(4)
-
-    prob_choose_right, contrasts, n_contrasts = compute_performance(trials, signed_contrast=signed_contrast, block=block,
-                                                                    prob_right=True)
-
-    if plotting:
-        psych, _ = psy.mle_fit_psycho(
-            np.vstack([contrasts, n_contrasts, prob_choose_right]),
-            P_model='erf_psycho_2gammas',
-            parstart=np.array([0., 40., 0.1, 0.1]),
-            parmin=np.array([-50., 10., 0., 0.]),
-            parmax=np.array([50., 50., 0.2, 0.2]),
-            nfits=10)
-    else:
-
-        psych, _ = psy.mle_fit_psycho(
-            np.vstack([contrasts, n_contrasts, prob_choose_right]),
-            P_model='erf_psycho_2gammas',
-            parstart=np.array([np.mean(contrasts), 20., 0.05, 0.05]),
-            parmin=np.array([np.min(contrasts), 0., 0., 0.]),
-            parmax=np.array([np.max(contrasts), 100., 1, 1]))
-
-    return psych #psych = [bias, threshold, gamma_low, gamma_high]
-
-contrasts_2 = [-100. , -25. , 0. , 25. , 100. ]
-
-
+# ------------------------------------------------------------------
+# Plotting
+# ------------------------------------------------------------------
+contrasts_ticks = [-100., -25., 0., 25., 100.]
 
 def plot_psychometric(trials, ax=None, title=None, **kwargs):
-    """
-    Function to plot pyschometric curve plots a la datajoint webpage
-    :param trials:
-    :return:
-    """
 
-    signed_contrast = trials['signed_contrast']*100
-    contrasts_fit = np.arange(-100, 100)
+    signed_contrast = trials['signed_contrast'] * 100
+    contrasts_fit = np.linspace(-100, 100, 400)
 
-    prob_right_50, contrasts_50, _ = compute_performance(trials, signed_contrast=signed_contrast, block=0.5, prob_right=True)
-    pars_50 = compute_psychometric(trials, signed_contrast=signed_contrast, block=0.5, plotting=True)
-    prob_right_fit_50 = psy.erf_psycho_2gammas(pars_50, contrasts_fit)
+    blocks = [0.5, 0.2, 0.8]
+    cmap = {0.5: "#320F42", 0.2: "#E07C12", 0.8: "#008F7C"}
 
-    prob_right_20, contrasts_20, _ = compute_performance(trials, signed_contrast=signed_contrast, block=0.2, prob_right=True)
-    pars_20 = compute_psychometric(trials, signed_contrast=signed_contrast, block=0.2, plotting=True)
-    prob_right_fit_20 = psy.erf_psycho_2gammas(pars_20, contrasts_fit)
+    # Fit parameters for plotting only
+    pars_plot = {
+        b: fit_psychometric(trials, signed_contrast, b, mode='plot')
+        for b in blocks
+    }
 
-    prob_right_80, contrasts_80, _ = compute_performance(trials, signed_contrast=signed_contrast, block=0.8, prob_right=True)
-    pars_80 = compute_psychometric(trials, signed_contrast=signed_contrast, block=0.8, plotting=True)
-    prob_right_fit_80 = psy.erf_psycho_2gammas(pars_80, contrasts_fit)
-
-    cmap = ["#E07C12","#320F42","#008F7C"]
-
-    if not ax:
+    if ax is None:
         fig, ax = plt.subplots(**kwargs)
     else:
         fig = plt.gcf()
 
-    # TODO error bars
+    for b in blocks:
+        prob_right, contrasts, _ = compute_performance(
+            trials, signed_contrast=signed_contrast, block=b, prob_right=True
+        )
 
-    fit_50 = ax.plot(contrasts_fit, prob_right_fit_50, color=cmap[1])
-    data_50 = ax.scatter(contrasts_50, prob_right_50, color=cmap[1])
-    fit_20 = ax.plot(contrasts_fit, prob_right_fit_20, color=cmap[0])
-    data_20 = ax.scatter(contrasts_20, prob_right_20, color=cmap[0])
-    fit_80 = ax.plot(contrasts_fit, prob_right_fit_80, color=cmap[2])
-    data_80 = ax.scatter(contrasts_80, prob_right_80, color=cmap[2])
-    ax.legend([fit_50[0], data_50, fit_20[0], data_20, fit_80[0], data_80],
-              ['p_L=0.5 fit', 'p_L=0.5 data', 'p_L=0.2 fit', 'p_L=0.2 data', 'p_L=0.8 fit', 'p_L=0.8 data'],
-              loc='lower right', frameon=False)
+        ax.plot(
+            contrasts_fit,
+            psy.erf_psycho_2gammas(pars_plot[b], contrasts_fit),
+            color=cmap[b],
+            label=f'pL={b} fit'
+        )
+
+        ax.scatter(
+            contrasts,
+            prob_right,
+            color=cmap[b],
+            label=f'pL={b} data'
+        )
+
     ax.set_ylim(-0.05, 1.05)
+    ax.set_xlabel('Contrast (%)')
     ax.set_ylabel('Prob. choosing right')
-    ax.set_xlabel('Contrasts')
-    
-    plt.xticks(contrasts_2)
-    plt.axhline(y=0.5,color = 'gray', linestyle = '--',linewidth=0.25) 
-    plt.axvline(x=0.5,color = 'gray', linestyle = '--',linewidth=0.25) 
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-    ax.spines['left'].set_visible(False)
+
+    ax.set_xticks(contrasts_ticks)
+    ax.axhline(0.5, color='gray', linestyle='--', linewidth=0.5)
+    ax.axvline(0, color='gray', linestyle='--', linewidth=0.5)
+
+    ax.spines[['top', 'right', 'bottom', 'left']].set_visible(False)
+
     if title:
         ax.set_title(title)
 
     return fig, ax
-# fig, ax = plot_psychometric(df_responses)
-fig, ax = plot_psychometric(
-    df_responses,
-    figsize=(6, 6)   # width, height in inches
-)
+
+# ------------------------------------------------------------------
+# Running the analysis
+# ------------------------------------------------------------------
+
+# Define subjects and targets
+df_responses['subject_target'] = df_responses['subject'] + '-' + df_responses['target']
+
+# Initialize list to store stats
+stats_list = []
+
+# Loop through each subject-target combination and each session (eid)
+for (subject_target, eid), group in df_responses.groupby(['subject_target', 'eid']):
+    
+    signed_contrast = group['signed_contrast'] * 100
+    
+    # Fit psychometric parameters for each block
+    pars_stats = {
+        b: fit_psychometric(group, signed_contrast, b, mode='stats')
+        for b in [0.5, 0.2, 0.8]
+    }
+
+    # Store values in a dictionary
+    stats_dict = {
+        'subject': group['subject'].iloc[0],
+        'target': group['target'].iloc[0],
+        'eid': eid,
+        'bias_50': pars_stats[0.5][0],
+        'threshold_50': pars_stats[0.5][1],
+        'gamma_low_50': pars_stats[0.5][2],
+        'gamma_high_50': pars_stats[0.5][3],
+        'bias_20': pars_stats[0.2][0],
+        'threshold_20': pars_stats[0.2][1],
+        'gamma_low_20': pars_stats[0.2][2],
+        'gamma_high_20': pars_stats[0.2][3],
+        'bias_80': pars_stats[0.8][0],
+        'threshold_80': pars_stats[0.8][1],
+        'gamma_low_80': pars_stats[0.8][2],
+        'gamma_high_80': pars_stats[0.8][3]
+    }
+    
+    stats_list.append(stats_dict)
+
+    # Plot psychometric curve for each session
+    fig, ax = plot_psychometric(group, figsize=(6, 6), title=f"Subject: {group['subject'].iloc[0]} - Session: {eid}")
+    plt.show()
+
+# Convert list of stats to DataFrame
+df_psych_stats = pd.DataFrame(stats_list)
+
+# Show the final DataFrame with psychometric parameters for each session
+print(df_psych_stats)
 
 
 
 
 
-
-
-
-
-
-# %%
