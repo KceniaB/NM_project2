@@ -989,4 +989,195 @@ df_responses.to_parquet('responses_for_psychometric_parameters.pqt')
 #########################################################################################
 
 
-"""
+""" 
+
+# df_responses = df_original[df_original.event == 'stimOn_times'].copy()
+df_responses = df_original[df_original.event == 'feedback_times'].copy()
+df_responses["probabilityLeft"] = df_responses.p_left
+
+# STEP 1 — Reduce photometry to session-level - mean feedback response
+df_photometry_session = (
+    df_responses
+    .groupby(['subject', 'target', 'eid', 'NM', 'probabilityLeft'])
+    .agg(
+        NM_feedback=('response_mean', 'mean')
+    )
+    .reset_index()
+)
+
+# STEP 2 — Merge with psychometric parameters
+df_session = df_psych_stats.merge(
+    df_photometry_session,
+    on=['subject', 'target', 'eid', 'probabilityLeft'],
+    how='inner'
+)
+
+df_responses['event'].unique()
+
+df_session[['probabilityLeft']].value_counts()
+
+# df_session[['NM', 'target']].drop_duplicates()
+
+
+# STEP 3 — Correlations per NM × target × parameter × block
+# psych_params = {
+#     'bias':        ['bias_50', 'bias_20', 'bias_80'],
+#     'threshold':   ['threshold_50', 'threshold_20', 'threshold_80'],
+#     'gamma_low':   ['gamma_low_50', 'gamma_low_20', 'gamma_low_80'],
+#     'gamma_high':  ['gamma_high_50', 'gamma_high_20', 'gamma_high_80'],
+# }
+psych_params = ['bias', 'threshold', 'gamma_low', 'gamma_high']
+
+rows = []
+
+for (nm, target), df_grp in df_session.groupby(['NM', 'target']):
+
+    for param in ['bias', 'threshold', 'gamma_low', 'gamma_high']:
+
+        tmp = df_grp[[param, 'NM_feedback', 'probabilityLeft']].dropna()
+
+        if tmp.shape[0] < 5:
+            continue
+
+        for block, df_block in tmp.groupby('probabilityLeft'):
+
+            if df_block.shape[0] < 5:
+                continue
+
+            rows.append({
+                'NM': nm,
+                'target': target,
+                'parameter': param,
+                'block': block,
+                'correlation': df_block[param].corr(
+                    df_block['NM_feedback'],
+                    method='spearman'
+                ),
+                'n_sessions': df_block.shape[0]
+            })
+
+df_corr_all = pd.DataFrame(rows)
+
+
+
+# STEP 4 — Plot (this is also essential)
+df_plot_all = df_corr_all.query('n_sessions >= 5')
+
+params = ['bias', 'threshold', 'gamma_low', 'gamma_high']
+
+fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+axes = axes.flatten()
+
+for ax, param in zip(axes, params):
+
+    df_param = df_plot_all.query("parameter == @param")
+
+    pivot = df_param.pivot_table(
+        index=['NM', 'target'],
+        columns='block',
+        values='correlation'
+    )
+
+    sns.heatmap(
+        pivot,
+        ax=ax,
+        cmap='coolwarm',
+        vmin=-1, vmax=1, center=0,
+        annot=True, fmt=".2f",
+        cbar=False
+    )
+
+    ax.set_title(param.replace('_', ' ').title())
+    ax.set_xlabel('Block (pLeft)')
+    ax.set_ylabel('NM × target')
+
+import matplotlib as mpl
+
+norm = mpl.colors.Normalize(vmin=-1, vmax=1)
+sm = mpl.cm.ScalarMappable(norm=norm, cmap='coolwarm')
+sm.set_array([])
+
+cbar = fig.colorbar(
+    sm,
+    ax=axes,
+    fraction=0.03,
+    pad=0.04
+)
+cbar.set_label('Spearman correlation')
+
+
+plt.suptitle('Correlation between NM feedback and psychometric parameters')
+plt.tight_layout(rect=[0, 0, 0.9, 0.95])
+plt.show()
+
+
+
+
+
+#%%
+import numpy as np
+
+def mean_response_in_window(tpts, response, tmin=0.01, tmax=0.5):
+    """
+    Compute mean response in a given time window.
+
+    Parameters
+    ----------
+    tpts : array-like
+        Time points (seconds), same length as response
+    response : array-like
+        Signal values
+    tmin, tmax : float
+        Time window
+
+    Returns
+    -------
+    float
+        Mean response in window, or NaN if invalid
+    """
+    tpts = np.asarray(tpts)
+    response = np.asarray(response)
+
+    mask = (tpts >= tmin) & (tpts <= tmax)
+
+    if not np.any(mask):
+        return np.nan
+
+    return np.nanmean(response[mask])
+
+
+
+df_responses['response_mean_win'] = df_responses.apply(
+    lambda row: mean_response_in_window(
+        row['tpts'],
+        row['response'],
+        tmin=0.01,
+        tmax=0.5
+    ),
+    axis=1
+)
+
+
+df_photometry_session = (
+    df_responses
+    .groupby(['subject', 'target', 'eid', 'NM', 'probabilityLeft'])
+    .agg(
+        NM_feedback=('response_mean_win', 'mean'),
+        n_trials=('response_mean_win', 'count')
+    )
+    .reset_index()
+)
+
+
+
+import matplotlib.pyplot as plt
+
+i = 1181
+plt.plot(df_responses.loc[i, 'tpts'], df_responses.loc[i, 'response'])
+plt.axvspan(0.01, 0.5, color='red', alpha=0.2)
+plt.title(f"Mean = {df_responses.loc[i, 'response_mean_win']:.3f}")
+plt.xlabel('Time (s)')
+plt.ylabel('Photometry')
+plt.show()
+
+# %%
