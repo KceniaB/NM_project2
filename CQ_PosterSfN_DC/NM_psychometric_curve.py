@@ -943,6 +943,24 @@ df_psych_stats = pd.DataFrame(stats_list)
 print(df_psych_stats)
 
 
+# saved
+df_psych_stats.to_parquet('psychometric_params_all_sessions.pqt')
+df_psych_stats.to_csv('psychometric_params_all_sessions.csv', index=False)
+
+df_responses.to_parquet('responses_for_psychometric_parameters.pqt')
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -952,3 +970,23 @@ print(df_psych_stats)
 
 #%%
 
+
+
+
+
+
+"""
+
+
+#########################################################################################
+
+#########################################################################################
+
+###### PART 4 - Psychometric parameters modeling ########################################
+
+#########################################################################################
+
+#########################################################################################
+
+
+"""
