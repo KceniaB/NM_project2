@@ -1005,7 +1005,9 @@ df_photometry_session = (
     .reset_index()
 )
 
-# STEP 2 — Merge with psychometric parameters
+# STEP 2 — Merge with psychometric parameters 
+
+# df_psych_stats = pd.read_parquet('psychometric_params_all_sessions.pqt')
 df_session = df_psych_stats.merge(
     df_photometry_session,
     on=['subject', 'target', 'eid', 'probabilityLeft'],
