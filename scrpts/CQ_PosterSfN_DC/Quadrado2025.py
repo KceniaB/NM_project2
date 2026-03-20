@@ -1,3 +1,4 @@
+#%%
 import numpy as np
 import pandas as pd
 import traceback
@@ -1090,7 +1091,7 @@ for (target, NM), df_target in df_biased.groupby(['target', 'NM']):
         # --- Save & show ---
         fname = f'{target}-{NM}_{event_name}_congruency_{response_window}s'
         # fig.savefig('figures/broken0_' + fname + '.svg', bbox_inches='tight') 
-        fig.savefig('figures/broken0_' + fname + '.png', bbox_inches='tight')
+        # fig.savefig('figures/broken0_' + fname + '.png', bbox_inches='tight')
 
         plt.tight_layout()
         plt.show()
