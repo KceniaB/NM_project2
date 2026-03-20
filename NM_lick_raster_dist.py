@@ -253,7 +253,7 @@ skipped_corrupted, skipped_no_tongue, skipped_other = [], [], []
 
 """ main loop ____________________________________________________________________________________________"""
 # filter the eids with LP data
-df_250 = pd.read_csv('/home/kceniabougrova/Downloads/LightningPoseSessions.xlsx - NoVideoSyncErrors.csv')
+df_250 = pd.read_csv('/home/kceniabougrova/Documents/NM_project_fromIBLserver/NM_project2/data/LightningPoseSessions.xlsx - NoVideoSyncErrors.csv')
 df_250 = df_250[df_250['LP'].notna()]
 df_250_list = df_250['eid'].tolist()
 
