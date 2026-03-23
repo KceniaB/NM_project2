@@ -238,13 +238,66 @@ def plot_session(video_data_licks, video_data_licks_original, trials_df, session
     plt.close()
     print(f"Saved: {safe_name}")
 
+def plot_session_log(video_data_licks, video_data_licks_original, trials_df, session_name):
+    edges = np.unique(np.round(np.concatenate([
+        np.arange(0.00, 0.10 + 0.02, 0.02),
+        np.arange(0.10, 0.90 + 0.02, 0.02),
+        np.arange(0.90, 1.00 + 0.02, 0.02),
+    ]), 6))
 
+    l = video_data_licks["tongue_end_l_likelihood"].dropna()
+    r = video_data_licks["tongue_end_r_likelihood"].dropna()
+
+    counts_l, _ = np.histogram(l, bins=edges)
+    counts_r, _ = np.histogram(r, bins=edges)
+    total_l = len(l)
+    total_r = len(r)
+    density_l = counts_l / total_l
+    density_r = counts_r / total_r
+
+    # --- lick events ---
+    video_data_licks_2 = likelihood_threshold(video_data_licks_original.copy(), threshold=THRESHOLD)
+    lick_event_times, _ = get_feature_event_times(video_data_licks_2, video_data_licks_2['times'], cols_tongue, 2)
+    lick_event_times = lick_event_times.to_frame(name='times')
+    lick_times = lick_event_times['times'].to_numpy()
+
+    # --- plot ---
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4), sharey=False)
+    fig.suptitle(f"Session: {session_name}", fontsize=11, y=1.02)
+
+    bin_centers = (edges[:-1] + edges[1:]) / 2
+
+    axes[0].bar(bin_centers, density_l, width=np.diff(edges),
+                color="#5bc0eb", alpha=0.8, label="Left", align='center')
+    axes[0].bar(bin_centers, density_r, width=np.diff(edges),
+                color="#f7b538", alpha=0.8, label="Right", align='center')
+    axes[0].set_yscale('log')
+    axes[0].set_xlim(0, 1)
+    axes[0].axvline(0.9, color="black", linewidth=1, linestyle="--", alpha=0.75)
+    axes[0].set_title("Full scale (log)", fontsize=10)
+    axes[0].set_xlabel("Likelihood", fontsize=10)
+    # axes[0].set_ylabel("% of frames", fontsize=10)
+    # axes[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.2g}%"))
+    axes[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.2g}"))
+    axes[0].set_ylabel("proportion of frames (log scale)", fontsize=10)    
+    axes[0].legend(fontsize=9, frameon=False)
+    axes[0].spines[["top", "right"]].set_visible(False)
+
+    # --- ax2: lick raster ---
+    plot_lick_raster(lick_times, trials_df, axes[1])
+
+    plt.tight_layout()
+    safe_name = str(session_name).replace('/', '_')
+    # plt.show()
+    plt.savefig(os.path.join(save_dir, f"{safe_name}.png"), dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {safe_name}")
 
 
 #%% 
 
-# save_dir = '/home/kceniabougrova/Documents/LP_licks_distribution/LP_LD_3'
-# os.makedirs(save_dir, exist_ok=True)
+save_dir = '/home/kceniabougrova/Documents/LP_licks_distribution/LP_LD_3_log'
+os.makedirs(save_dir, exist_ok=True)
 
 skipped_corrupted, skipped_no_tongue, skipped_other = [], [], []
 
@@ -277,6 +330,47 @@ for eid in df_250_list:
         trials_df = pd.DataFrame(trials_extract)
 
         plot_session(video_data_licks, video_data_licks_original, trials_df, session_name=eid)
+
+    except json.JSONDecodeError as e:
+        print(f"[CORRUPTED] {eid}: {e}")
+        skipped_corrupted.append(eid)
+    except KeyError as e:
+        print(f"[NO TONGUE COLS] {eid}: {e}")
+        skipped_no_tongue.append(eid)
+    except Exception as e:
+        print(f"[OTHER] {eid}: {e}")
+        skipped_other.append(eid)
+
+print(f"\nDone. Corrupted: {len(skipped_corrupted)}, "
+      f"No tongue: {len(skipped_no_tongue)}, "
+      f"Other: {len(skipped_other)}")
+# %%
+""" main loop for log-scale____________________________________________________________________________________________"""
+# filter the eids with LP data
+df_250 = pd.read_csv('/home/kceniabougrova/Documents/NM_project_fromIBLserver/NM_project2/data/LightningPoseSessions.xlsx - NoVideoSyncErrors.csv')
+df_250 = df_250[df_250['LP'].notna()]
+df_250_list = df_250['eid'].tolist()
+
+for eid in df_250_list:
+    try:
+        df_lp = one.load_object(eid, 'leftCamera', attribute=['lightningPose', 'times'])
+        video_data = pd.DataFrame(df_lp['lightningPose'])
+        video_data["times"] = df_lp['times']
+
+        cols = [
+            'tongue_end_l_x', 'tongue_end_l_y', 'tongue_end_l_likelihood',
+            'tongue_end_r_x', 'tongue_end_r_y', 'tongue_end_r_likelihood',
+            'times'
+        ]
+        video_data_licks          = video_data[cols].copy()
+        video_data_licks_original = video_data[cols].copy()
+
+        trials = one.load_object(eid, 'trials')
+        trials_extract = {k: v for k, v in trials.items()
+                          if isinstance(v, np.ndarray) and v.ndim == 1}
+        trials_df = pd.DataFrame(trials_extract)
+
+        plot_session_log(video_data_licks, video_data_licks_original, trials_df, session_name=eid)
 
     except json.JSONDecodeError as e:
         print(f"[CORRUPTED] {eid}: {e}")
