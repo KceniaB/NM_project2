@@ -262,7 +262,7 @@ def plot_session_log(video_data_licks, video_data_licks_original, trials_df, ses
     lick_times = lick_event_times['times'].to_numpy()
 
     # --- plot ---
-    fig, axes = plt.subplots(1, 2, figsize=(9, 4), sharey=False)
+    fig, axes = plt.subplots(1, 2, figsize=(7, 4), sharey=False)
     fig.suptitle(f"Session: {session_name}", fontsize=11, y=1.02)
 
     bin_centers = (edges[:-1] + edges[1:]) / 2
